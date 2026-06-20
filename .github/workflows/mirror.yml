@@ -1,0 +1,20 @@
+---
+name: Mirror to Codeberg
+
+on:
+  push:
+  delete:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to Codeberg
+        run: |
+          git remote add codeberg https://ejsadiarin:${{ secrets.CODEBERG_TOKEN }}@codeberg.org/ejsadiarin/coreban.git
+          git push --mirror codeberg
