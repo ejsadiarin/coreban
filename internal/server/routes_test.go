@@ -60,10 +60,12 @@ func gatewayToken(t *testing.T, priv ed25519.PrivateKey, audience string) string
 
 func TestHealthNeedsNoToken(t *testing.T) {
 	h, _ := verifiedRouter(t)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
-	if rec.Code != http.StatusOK {
-		t.Errorf("GET /health status = %d, want 200", rec.Code)
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(method, "/health", nil))
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s /health status = %d, want 200", method, rec.Code)
+		}
 	}
 }
 

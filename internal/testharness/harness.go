@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -67,19 +68,28 @@ func start(ctx context.Context) (*pgxpool.Pool, error) {
 		return nil, err
 	}
 
-	// Production shape: the schema exists before migrations run (bootstrap
-	// creates it), and every session is scoped to it by search_path.
-	admin, err := sql.Open("pgx", base)
+	// Production shape (internal/db/bootstrap.sql): the owner role owns the
+	// coreban schema and runs migrations; the API connects as the DML-only
+	// coreban_role, scoped by that role's search_path. A slice that forgets
+	// a grant fails here, not in production.
+	super, err := sql.Open("pgx", base)
 	if err != nil {
 		return nil, err
 	}
-	defer admin.Close()
-	if _, err := admin.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS "+schema); err != nil {
-		return nil, err
+	defer super.Close()
+	if _, err := super.ExecContext(ctx, "CREATE ROLE neondb_owner LOGIN PASSWORD 'owner'"); err != nil {
+		return nil, fmt.Errorf("create owner role: %w", err)
+	}
+	bootstrap := strings.Replace(db.Bootstrap, "'REPLACE_ME'", "'runtime'", 1)
+	if _, err := super.ExecContext(ctx, bootstrap); err != nil {
+		return nil, fmt.Errorf("bootstrap: %w", err)
 	}
 
-	scoped := base + "&options=" + url.QueryEscape("-c search_path="+schema)
-	migrator, err := sql.Open("pgx", scoped)
+	migrationURL, err := as(base, "neondb_owner", "owner")
+	if err != nil {
+		return nil, err
+	}
+	migrator, err := sql.Open("pgx", migrationURL+"&options="+url.QueryEscape("-c search_path="+schema))
 	if err != nil {
 		return nil, err
 	}
@@ -88,11 +98,25 @@ func start(ctx context.Context) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 
-	p, err := pgxpool.New(ctx, scoped)
+	databaseURL, err := as(base, "coreban_role", "runtime")
+	if err != nil {
+		return nil, err
+	}
+	p, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
 		return nil, err
 	}
 	return p, p.Ping(ctx)
+}
+
+// as rewrites a connection string to log in as another role.
+func as(connStr, user, password string) (string, error) {
+	u, err := url.Parse(connStr)
+	if err != nil {
+		return "", err
+	}
+	u.User = url.UserPassword(user, password)
+	return u.String(), nil
 }
 
 // Identity is the verified gateway identity a test request carries. The
@@ -108,12 +132,12 @@ type Identity struct {
 // injected exactly where the token verifier would establish it.
 func Router(t *testing.T, id Identity) http.Handler {
 	t.Helper()
-	return server.New(Postgres(t), Inject(id)).Routes()
+	return server.New(Postgres(t), inject(id)).Routes()
 }
 
-// Inject is a stand-in for the verifier middleware that establishes id
+// inject is a stand-in for the verifier middleware that establishes id
 // without a token.
-func Inject(id Identity) func(http.Handler) http.Handler {
+func inject(id Identity) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if id.Owner == uuid.Nil {

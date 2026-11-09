@@ -21,6 +21,8 @@ func (s *Server) Routes() chi.Router {
 	r.Use(requestIDMiddleware)
 	r.Use(slogMiddleware)
 	r.Use(middleware.Recoverer)
+	// Probes and clients may send HEAD; serve it from the GET route.
+	r.Use(middleware.GetHead)
 
 	r.Get("/health", s.liveness)
 

@@ -27,4 +27,8 @@ func TestPostgresIsScopedToTheCorebanSchemaWithMigrationsApplied(t *testing.T) {
 	if applied == 0 {
 		t.Error("no migrations recorded in coreban.goose_db_version")
 	}
+
+	if _, err := pool.Exec(ctx, "CREATE TABLE harness_ddl_probe (id int)"); err == nil {
+		t.Error("runtime role created a table; it must be DML-only like production's coreban_role")
+	}
 }

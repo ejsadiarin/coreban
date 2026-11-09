@@ -8,7 +8,6 @@ import (
 
 // Config holds coreban's environment-driven settings.
 type Config struct {
-	Env  string
 	Port string
 
 	// DatabaseURL is the runtime connection (pooler host, DML-only role whose
@@ -32,7 +31,6 @@ type Config struct {
 // Load reads the environment, applying defaults for local development.
 func Load() *Config {
 	return &Config{
-		Env:          getEnv("ENV", "development"),
 		Port:         getEnv("PORT", "6972"),
 		DatabaseURL:  os.Getenv("DATABASE_URL"),
 		MigrationURL: os.Getenv("MIGRATION_URL"),

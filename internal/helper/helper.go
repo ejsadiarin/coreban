@@ -35,6 +35,9 @@ func GetUserID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	return id, true
 }
 
+// ResolveTargetUser is for GET/HEAD handlers only: writes are always bound
+// to the caller and must use GetUserID instead.
+//
 // ResolveTargetUser resolves act_as delegation: an admin-scoped caller with
 // a signed act_as claim reads as the target, everyone else reads as
 // themselves. The raw query param is never trusted.
