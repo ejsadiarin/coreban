@@ -40,7 +40,7 @@ type Board struct {
 	Columns []Column `json:"columns,omitempty"`
 }
 
-// defaultColumns are the stages a new board starts with, one per status.
+// defaultColumns are the columns a new board starts with, one per status.
 var defaultColumns = []Column{
 	{Name: "Todo", Status: StatusTodo},
 	{Name: "Doing", Status: StatusInProgress},

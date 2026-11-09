@@ -56,10 +56,22 @@ func (s *Store) List(ctx context.Context, owner uuid.UUID) ([]Board, error) {
 	})
 }
 
-// Get returns one of the owner's boards with its columns in board order.
+// Get returns one of the owner's boards with its columns in board order,
+// read from one snapshot so a concurrent change can't split the two.
 func (s *Store) Get(ctx context.Context, owner, id uuid.UUID) (Board, error) {
+	var b Board
+	err := pgx.BeginTxFunc(ctx, s.Pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly},
+		func(tx pgx.Tx) error {
+			var err error
+			b, err = get(ctx, tx, owner, id)
+			return err
+		})
+	return b, err
+}
+
+func get(ctx context.Context, tx pgx.Tx, owner, id uuid.UUID) (Board, error) {
 	b := Board{ID: id}
-	err := s.Pool.QueryRow(ctx,
+	err := tx.QueryRow(ctx,
 		`SELECT name, created_at, updated_at FROM boards WHERE id = $1 AND owner_id = $2`,
 		id, owner).Scan(&b.Name, &b.CreatedAt, &b.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -68,7 +80,7 @@ func (s *Store) Get(ctx context.Context, owner, id uuid.UUID) (Board, error) {
 	if err != nil {
 		return Board{}, err
 	}
-	rows, err := s.Pool.Query(ctx,
+	rows, err := tx.Query(ctx,
 		`SELECT id, name, status, position FROM columns WHERE board_id = $1 ORDER BY position`, id)
 	if err != nil {
 		return Board{}, err
