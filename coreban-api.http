@@ -18,3 +18,37 @@ GET {{host}}/api/coreban/health?user_id=PASTE_TARGET_USER_UUID_HERE
 ### Direct without a token (expect 401)
 
 GET http://localhost:6972/api/coreban/health
+
+# ─── Boards ────────────────────────────────────────────────────────────────
+# Reads honour an admin's targeted read (?user_id= at the gateway); writes
+# always bind to the caller. Another owner's board answers 404.
+
+### List my boards (oldest first, no columns)
+
+GET {{host}}/api/coreban/boards
+
+### Create a board (starts with Todo, Doing, Done columns) → 201
+
+POST {{host}}/api/coreban/boards
+Content-Type: application/json
+
+{
+  "name": "Homelab"
+}
+
+### Get a board with its columns in order
+
+GET {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE
+
+### Rename a board
+
+PATCH {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE
+Content-Type: application/json
+
+{
+  "name": "Homelab ops"
+}
+
+### Delete a board and everything on it → 204
+
+DELETE {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE

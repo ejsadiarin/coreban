@@ -12,6 +12,7 @@ Kanban boards and ntfy reminders, served as a downstream service behind
 | Liveness | `GET /health` — no token |
 | API | `/api/coreban/*` — gateway internal token only (audience `coreban`), else 401 |
 | Verified health | `GET /api/coreban/health` — `{"status":"ok","owner":…}` once token + database work |
+| Boards | `GET/POST /api/coreban/boards`, `GET/PATCH/DELETE /api/coreban/boards/{id}` — see `coreban-api.http` |
 
 coreban refuses to start if it cannot fetch the gateway's JWKS
 (`JWT_JWKS_URL`). Copy `.env.example` to `.env`, then:

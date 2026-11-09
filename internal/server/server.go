@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/ejsadiarin/coreban/internal/board"
 )
 
 // Server holds the dependencies for the coreban API.
@@ -13,6 +15,7 @@ type Server struct {
 	// /api/coreban. In production it is the gateway token verifier's
 	// middleware; tests may inject an identity directly.
 	authenticate func(http.Handler) http.Handler
+	Boards       *board.Handler
 }
 
 // New wires a Server. It panics on a nil authenticate: serving the API
@@ -21,5 +24,9 @@ func New(pool *pgxpool.Pool, authenticate func(http.Handler) http.Handler) *Serv
 	if authenticate == nil {
 		panic("server: authenticate middleware is required")
 	}
-	return &Server{Pool: pool, authenticate: authenticate}
+	return &Server{
+		Pool:         pool,
+		authenticate: authenticate,
+		Boards:       &board.Handler{Store: &board.Store{Pool: pool}},
+	}
 }
