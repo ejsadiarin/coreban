@@ -23,6 +23,12 @@ make migrate-up      # or, in the image: ./coreban-api migrate
 make run
 ```
 
+## Queries
+
+SQL lives in `internal/db/queries/`; `make sqlc` regenerates the typed Go in
+`internal/db/sqlc/` (sqlc v1.31.1) from those queries and the migrations.
+Never edit the generated files; `make sqlc-check` fails when they're stale.
+
 ## Tests
 
 ```sh

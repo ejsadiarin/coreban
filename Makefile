@@ -2,7 +2,7 @@
 -include .env
 export
 
-.PHONY: run build test test-unit test-integration migrate-up migrate-create docker-build
+.PHONY: run build test test-unit test-integration migrate-up migrate-create sqlc sqlc-check docker-build
 
 run:
 	go run ./cmd/coreban
@@ -28,6 +28,16 @@ migrate-up:
 migrate-create:
 	@test -n "$(name)" || (echo "usage: make migrate-create name=<snake_case>" && exit 1)
 	goose -dir internal/db/migrations -s create $(name) sql
+
+# Regenerates internal/db/sqlc from internal/db/queries + the migrations.
+# Needs sqlc v1.31.1 (same as coredraw/corefinance):
+#   go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+sqlc:
+	sqlc generate
+
+# Fails when the generated code is stale.
+sqlc-check:
+	sqlc diff
 
 docker-build:
 	docker build -f Dockerfile.coreban-api --target api -t coreban-api .

@@ -1,5 +1,4 @@
 ---
-# TODO: check version deps if updated
 version: "2"
 sql:
   - engine: "postgresql"
@@ -7,8 +6,8 @@ sql:
     schema: "internal/db/migrations"
     gen:
       go:
-        package: "sqlc"
-        out: "internal/db"
+        package: "db"
+        out: "internal/db/sqlc"
         sql_package: "pgx/v5"
         emit_json_tags: true
         emit_prepared_queries: false
