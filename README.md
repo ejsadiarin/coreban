@@ -14,6 +14,7 @@ Kanban boards and ntfy reminders, served as a downstream service behind
 | Verified health | `GET /api/coreban/health` — `{"status":"ok","owner":…}` once token + database work |
 | Boards | `GET/POST /api/coreban/boards`, `GET/PATCH/DELETE /api/coreban/boards/{id}` — see `coreban-api.http` |
 | Cards | `POST /api/coreban/boards/{id}/cards`, `GET/PATCH …/cards/{cardID}`, `POST …/cards/{cardID}/move` — see `coreban-api.http` |
+| Settings | `GET/PUT /api/coreban/settings` — notification target (`ntfy_topic`) and IANA `timezone` |
 
 coreban refuses to start if it cannot fetch the gateway's JWKS
 (`JWT_JWKS_URL`). Copy `.env.example` to `.env`, then:
@@ -23,6 +24,31 @@ psql "$MIGRATION_URL" -f internal/db/bootstrap.sql   # once per environment
 make migrate-up      # or, in the image: ./coreban-api migrate
 make run
 ```
+
+## ntfy server
+
+Reminders go to `NTFY_URL` with `NTFY_TOKEN`. Each owner's notification
+target is only a topic name on that server: never a URL, always prefixed
+`coreban-` (enforced by the API and the database), and claimed by one owner
+at a time. The prefix only protects anything if the server enforces it too:
+
+```yaml
+# server.yml: nobody reads or writes without an account
+auth-file: /var/lib/ntfy/user.db
+auth-default-access: deny-all
+```
+
+```sh
+ntfy user add coreban                          # coreban's own account: role user, never admin (admins bypass ACLs)
+ntfy access coreban 'coreban-*' write-only     # write to coreban-* and nothing else
+ntfy token add coreban                         # → NTFY_TOKEN
+
+ntfy access <you> coreban-<name> read-only     # each owner subscribes with their own account
+```
+
+With anonymous access denied, a topic name is not a secret anyone can
+subscribe to, and a leaked `NTFY_TOKEN` cannot reach topics outside
+`coreban-*`.
 
 ## Queries
 

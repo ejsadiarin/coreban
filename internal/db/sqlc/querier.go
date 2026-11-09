@@ -20,6 +20,9 @@ type Querier interface {
 	DeleteBoard(ctx context.Context, arg DeleteBoardParams) (int64, error)
 	GetBoard(ctx context.Context, arg GetBoardParams) (GetBoardRow, error)
 	GetCard(ctx context.Context, arg GetCardParams) (GetCardRow, error)
+	// Settings are keyed by owner_id: an owner only ever reads or writes their
+	// own row.
+	GetOwnerSettings(ctx context.Context, ownerID uuid.UUID) (GetOwnerSettingsRow, error)
 	ListBoardCards(ctx context.Context, boardID uuid.UUID) ([]ListBoardCardsRow, error)
 	ListBoards(ctx context.Context, ownerID uuid.UUID) ([]ListBoardsRow, error)
 	// The column's cards in order, leaving out the card being placed.
@@ -33,6 +36,7 @@ type Querier interface {
 	// placement within it for the rest of the transaction.
 	LockOwnedColumn(ctx context.Context, arg LockOwnedColumnParams) (uuid.UUID, error)
 	PlaceCard(ctx context.Context, arg PlaceCardParams) error
+	PutOwnerSettings(ctx context.Context, arg PutOwnerSettingsParams) error
 	RenameBoard(ctx context.Context, arg RenameBoardParams) (RenameBoardRow, error)
 	// Spreads the column's cards (except the one being placed) back to 1..n
 	// in their current order. Only needed when repeated inserts between the

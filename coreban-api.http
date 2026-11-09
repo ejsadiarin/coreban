@@ -91,3 +91,23 @@ Content-Type: application/json
   "column_id": "PASTE_COLUMN_UUID_HERE",
   "index": 0
 }
+
+# ─── Settings ──────────────────────────────────────────────────────────────
+# The owner's notification target (an ntfy topic name under coreban-, never
+# a URL) and IANA timezone. Defaults: no topic, UTC.
+
+### Get my settings
+
+GET {{host}}/api/coreban/settings
+
+### Save my settings (ntfy_topic null or "" clears the target)
+# 400 for a URL, a missing coreban- prefix, or an unknown timezone;
+# 409 when another owner already uses the topic.
+
+PUT {{host}}/api/coreban/settings
+Content-Type: application/json
+
+{
+  "ntfy_topic": "coreban-ejs-phone",
+  "timezone": "Asia/Manila"
+}

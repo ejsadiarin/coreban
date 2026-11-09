@@ -36,3 +36,10 @@ type Column struct {
 	Position  int32              `json:"position"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
+
+type OwnerSetting struct {
+	OwnerID   uuid.UUID          `json:"owner_id"`
+	NtfyTopic pgtype.Text        `json:"ntfy_topic"`
+	Timezone  string             `json:"timezone"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}

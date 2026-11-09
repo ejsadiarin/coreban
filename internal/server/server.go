@@ -6,6 +6,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ejsadiarin/coreban/internal/board"
+	"github.com/ejsadiarin/coreban/internal/settings"
 )
 
 // Server holds the dependencies for the coreban API.
@@ -16,6 +17,7 @@ type Server struct {
 	// middleware; tests may inject an identity directly.
 	authenticate func(http.Handler) http.Handler
 	Boards       *board.Handler
+	Settings     *settings.Handler
 }
 
 // New wires a Server. It panics on a nil authenticate: serving the API
@@ -28,5 +30,6 @@ func New(pool *pgxpool.Pool, authenticate func(http.Handler) http.Handler) *Serv
 		Pool:         pool,
 		authenticate: authenticate,
 		Boards:       &board.Handler{Store: &board.Store{Pool: pool}},
+		Settings:     &settings.Handler{Store: &settings.Store{Pool: pool}},
 	}
 }
