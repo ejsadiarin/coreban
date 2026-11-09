@@ -1,0 +1,20 @@
+# coreban-api — call through the gateway ({{host}} = gateway). Direct calls
+# to :6972 need a gateway-minted internal token with audience `coreban`.
+@host = http://localhost:8080
+
+### Liveness (direct, no token)
+
+GET http://localhost:6972/health
+
+### Verified health through the gateway (session or coreban:read key)
+# 200 {"status":"ok","owner":"<your user id>"} proves token + database.
+
+GET {{host}}/api/coreban/health
+
+### Admin targeted read: owner resolves to the target user
+
+GET {{host}}/api/coreban/health?user_id=PASTE_TARGET_USER_UUID_HERE
+
+### Direct without a token (expect 401)
+
+GET http://localhost:6972/api/coreban/health

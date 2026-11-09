@@ -1,31 +1,25 @@
 package server
 
 import (
-	"database/sql"
-	"time"
+	"net/http"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/cors"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// Server holds the dependencies for the coreban API.
 type Server struct {
-	sql.Conn
+	Pool *pgxpool.Pool
+	// authenticate establishes the verified identity for everything under
+	// /api/coreban. In production it is the gateway token verifier's
+	// middleware; tests may inject an identity directly.
+	authenticate func(http.Handler) http.Handler
 }
 
-// middlewares, register routes,
-func NewServer() {
-	r := chi.NewRouter()
-	r.Use(middleware.RequestID)                 // attaches a unique ID to each request
-	r.Use(middleware.Heartbeat("/ping"))        // healthcheck endpoint on /ping
-	r.Use(middleware.Logger)                    // logs start and end of each request
-	r.Use(middleware.Recoverer)                 // recovers from panics, returns 500
-	r.Use(middleware.Compress(5))               // gzip response compression
-	r.Use(middleware.Timeout(60 * time.Second)) // cancels ctx after duration
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins: []string{"*"},
-		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders: []string{"Accept", "Authorization", "Content-Type"},
-	}))
-	r.Use(middleware.StripSlashes)
+// New wires a Server. It panics on a nil authenticate: serving the API
+// without identity verification is never an option.
+func New(pool *pgxpool.Pool, authenticate func(http.Handler) http.Handler) *Server {
+	if authenticate == nil {
+		panic("server: authenticate middleware is required")
+	}
+	return &Server{Pool: pool, authenticate: authenticate}
 }

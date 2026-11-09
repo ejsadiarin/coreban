@@ -1,0 +1,19 @@
+FROM golang:1.27-alpine AS builder
+WORKDIR /app
+RUN apk add --no-cache git
+# to use docker cache
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /coreban-api ./cmd/coreban
+
+FROM alpine:latest AS api
+WORKDIR /app
+RUN apk --no-cache add ca-certificates
+COPY --from=builder /coreban-api .
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+USER appuser
+EXPOSE 6972
+
+# `./coreban-api migrate` applies pending migrations to MIGRATION_URL.
+CMD ["./coreban-api"]

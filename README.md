@@ -1,4 +1,42 @@
-# Kanban + Reminder tool
+# coreban
+
+Kanban boards and ntfy reminders, served as a downstream service behind
+[coregateway](https://github.com/ejsadiarin/coregateway). Vocabulary:
+`CONTEXT.md`; decisions: `docs/adr/`.
+
+## Running
+
+| | |
+|---|---|
+| Port | `6972` |
+| Liveness | `GET /health` — no token |
+| API | `/api/coreban/*` — gateway internal token only (audience `coreban`), else 401 |
+| Verified health | `GET /api/coreban/health` — `{"status":"ok","owner":…}` once token + database work |
+
+coreban refuses to start if it cannot fetch the gateway's JWKS
+(`JWT_JWKS_URL`). Copy `.env.example` to `.env`, then:
+
+```sh
+psql "$MIGRATION_URL" -f internal/db/bootstrap.sql   # once per environment
+make migrate-up      # or, in the image: ./coreban-api migrate
+make run
+```
+
+## Tests
+
+```sh
+make test        # unit + integration (needs Docker)
+make test-unit   # no Docker
+```
+
+Integration tests use `internal/testharness`: `Postgres(t)` gives a shared
+disposable Postgres scoped to the `coreban` schema with migrations applied,
+and `Router(t, Identity{Owner: …})` drives the production router with that
+identity injected in place of a gateway token. Create a fresh owner per test.
+
+---
+
+## Notes: Kanban + Reminder tool
 
 Kanban: pushed via ntfy server
 Reminders: pushed via ntfy server
