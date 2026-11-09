@@ -33,7 +33,7 @@ func (s *Store) Create(ctx context.Context, owner uuid.UUID, name string) (Board
 		}
 		b.CreatedAt, b.UpdatedAt = row.CreatedAt.Time, row.UpdatedAt.Time
 		for i, c := range defaultColumns {
-			c.ID, c.Position = uuid.New(), int32(i)
+			c.ID, c.Position, c.Cards = uuid.New(), int32(i), []Card{}
 			if err := q.CreateColumn(ctx, dbgen.CreateColumnParams{
 				ID: c.ID, BoardID: b.ID, Name: c.Name, Status: string(c.Status), Position: c.Position,
 			}); err != nil {
@@ -59,8 +59,9 @@ func (s *Store) List(ctx context.Context, owner uuid.UUID) ([]Board, error) {
 	return boards, nil
 }
 
-// Get returns one of the owner's boards with its columns in board order,
-// read from one snapshot so a concurrent change can't split the two.
+// Get returns one of the owner's boards with its columns in board order and
+// each column's cards in priority order, read from one snapshot so a
+// concurrent change can't split them.
 func (s *Store) Get(ctx context.Context, owner, id uuid.UUID) (Board, error) {
 	var b Board
 	err := pgx.BeginTxFunc(ctx, s.Pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly},
@@ -75,9 +76,23 @@ func (s *Store) Get(ctx context.Context, owner, id uuid.UUID) (Board, error) {
 			if err != nil {
 				return err
 			}
+			cards, err := q.ListBoardCards(ctx, id)
+			if err != nil {
+				return err
+			}
+			byColumn := map[uuid.UUID][]Card{}
+			for _, k := range cards {
+				byColumn[k.ColumnID] = append(byColumn[k.ColumnID], cardFromRow(dbgen.GetCardRow(k)))
+			}
 			b.Columns = make([]Column, 0, len(cols))
 			for _, c := range cols {
-				b.Columns = append(b.Columns, Column{ID: c.ID, Name: c.Name, Status: Status(c.Status), Position: c.Position})
+				colCards := byColumn[c.ID]
+				if colCards == nil {
+					colCards = []Card{}
+				}
+				b.Columns = append(b.Columns, Column{
+					ID: c.ID, Name: c.Name, Status: Status(c.Status), Position: c.Position, Cards: colCards,
+				})
 			}
 			return nil
 		})

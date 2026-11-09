@@ -52,3 +52,42 @@ Content-Type: application/json
 ### Delete a board and everything on it → 204
 
 DELETE {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE
+
+# ─── Cards ─────────────────────────────────────────────────────────────────
+# A card's status is its column's (ADR-0001). GET /boards/{id} lists each
+# column's cards in priority order.
+
+### Create a card at the bottom of a column → 201
+
+POST {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/cards
+Content-Type: application/json
+
+{
+  "column_id": "PASTE_COLUMN_UUID_HERE",
+  "title": "Upgrade k3s"
+}
+
+### Get a card (status reported from its column)
+
+GET {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/cards/PASTE_CARD_UUID_HERE
+
+### Edit a card's title and/or markdown description (absent fields unchanged)
+
+PATCH {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/cards/PASTE_CARD_UUID_HERE
+Content-Type: application/json
+
+{
+  "title": "Upgrade k3s to 1.31",
+  "description": "Drain nodes first:\n\n```sh\nkubectl drain node1 --ignore-daemonsets\n```"
+}
+
+### Move a card: to a column, at a slot among that column's other cards
+# index 0 is the top; anything past the end lands last.
+
+POST {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/cards/PASTE_CARD_UUID_HERE/move
+Content-Type: application/json
+
+{
+  "column_id": "PASTE_COLUMN_UUID_HERE",
+  "index": 0
+}

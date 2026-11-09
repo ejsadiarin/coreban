@@ -16,6 +16,7 @@ type column struct {
 	ID     string `json:"id"`
 	Name   string `json:"name"`
 	Status string `json:"status"`
+	Cards  []card `json:"cards"`
 }
 
 type board struct {

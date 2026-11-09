@@ -28,6 +28,8 @@ type Column struct {
 	Name     string    `json:"name"`
 	Status   Status    `json:"status"`
 	Position int32     `json:"position"`
+	// Cards are in priority order. Present on a single board's columns.
+	Cards []Card `json:"cards"`
 }
 
 // Board is an owner's named collection of columns, private to that owner.
@@ -38,6 +40,19 @@ type Board struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	// Columns are in board order. Omitted from list responses.
 	Columns []Column `json:"columns,omitempty"`
+}
+
+// Card is a single piece of work on a board, sitting in exactly one column.
+// Its Status is its column's, never stored on the card (ADR-0001).
+type Card struct {
+	ID          uuid.UUID `json:"id"`
+	BoardID     uuid.UUID `json:"board_id"`
+	ColumnID    uuid.UUID `json:"column_id"`
+	Status      Status    `json:"status"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // defaultColumns are the columns a new board starts with, one per status.

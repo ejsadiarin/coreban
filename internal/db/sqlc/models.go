@@ -17,6 +17,17 @@ type Board struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type Card struct {
+	ID          uuid.UUID          `json:"id"`
+	BoardID     uuid.UUID          `json:"board_id"`
+	ColumnID    uuid.UUID          `json:"column_id"`
+	Title       string             `json:"title"`
+	Description string             `json:"description"`
+	Position    float64            `json:"position"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Column struct {
 	ID        uuid.UUID          `json:"id"`
 	BoardID   uuid.UUID          `json:"board_id"`

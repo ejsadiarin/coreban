@@ -15,12 +15,30 @@ type Querier interface {
 	// or change another owner's board. Column statements take a board_id the
 	// caller has already resolved through an owner-scoped board query.
 	CreateBoard(ctx context.Context, arg CreateBoardParams) (CreateBoardRow, error)
+	CreateCard(ctx context.Context, arg CreateCardParams) error
 	CreateColumn(ctx context.Context, arg CreateColumnParams) error
 	DeleteBoard(ctx context.Context, arg DeleteBoardParams) (int64, error)
 	GetBoard(ctx context.Context, arg GetBoardParams) (GetBoardRow, error)
+	GetCard(ctx context.Context, arg GetCardParams) (GetCardRow, error)
+	ListBoardCards(ctx context.Context, boardID uuid.UUID) ([]ListBoardCardsRow, error)
 	ListBoards(ctx context.Context, ownerID uuid.UUID) ([]ListBoardsRow, error)
+	// The column's cards in order, leaving out the card being placed.
+	ListColumnPositions(ctx context.Context, arg ListColumnPositionsParams) ([]ListColumnPositionsRow, error)
 	ListColumns(ctx context.Context, boardID uuid.UUID) ([]ListColumnsRow, error)
+	LockOwnedCard(ctx context.Context, arg LockOwnedCardParams) (uuid.UUID, error)
+	// Card statements take a board_id the caller has already resolved through
+	// an owner-scoped query (LockOwnedColumn, GetBoard), or join boards to
+	// check owner_id themselves. A card's status is always read from its column.
+	// Confirms the column is on the owner's board and serialises card
+	// placement within it for the rest of the transaction.
+	LockOwnedColumn(ctx context.Context, arg LockOwnedColumnParams) (uuid.UUID, error)
+	PlaceCard(ctx context.Context, arg PlaceCardParams) error
 	RenameBoard(ctx context.Context, arg RenameBoardParams) (RenameBoardRow, error)
+	// Spreads the column's cards (except the one being placed) back to 1..n
+	// in their current order. Only needed when repeated inserts between the
+	// same neighbours exhaust the gap between them.
+	RenumberColumn(ctx context.Context, arg RenumberColumnParams) error
+	UpdateCard(ctx context.Context, arg UpdateCardParams) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)
