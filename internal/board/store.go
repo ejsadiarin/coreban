@@ -80,9 +80,13 @@ func (s *Store) Get(ctx context.Context, owner, id uuid.UUID) (Board, error) {
 			if err != nil {
 				return err
 			}
+			all := boardCards(cards)
+			if err := attachLabels(ctx, q, id, all); err != nil {
+				return err
+			}
 			byColumn := map[uuid.UUID][]Card{}
-			for _, k := range cards {
-				byColumn[k.ColumnID] = append(byColumn[k.ColumnID], cardFromRow(dbgen.GetCardRow(k)))
+			for _, k := range all {
+				byColumn[k.ColumnID] = append(byColumn[k.ColumnID], k)
 			}
 			b.Columns = make([]Column, 0, len(cols))
 			for _, c := range cols {

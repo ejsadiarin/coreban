@@ -28,7 +28,7 @@ var ErrCardArchived = errors.New("card is archived")
 func cardFromRow(r dbgen.GetCardRow) Card {
 	c := Card{
 		ID: r.ID, BoardID: r.BoardID, ColumnID: r.ColumnID, Status: Status(r.Status),
-		Title: r.Title, Description: r.Description,
+		Title: r.Title, Description: r.Description, Labels: []Label{},
 		CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
 	}
 	switch {
@@ -72,26 +72,32 @@ func (s *Store) CreateCard(ctx context.Context, owner, boardID, column uuid.UUID
 		if err := q.CreateCard(ctx, dbgen.CreateCardParams{ID: id, BoardID: boardID, ColumnID: column, Title: title}); err != nil {
 			return fmt.Errorf("insert card: %w", err)
 		}
-		row, err := q.GetCard(ctx, dbgen.GetCardParams{ID: id, BoardID: boardID, OwnerID: owner})
-		if err != nil {
-			return err
-		}
-		c = cardFromRow(row)
-		return nil
+		var err error
+		c, err = readCard(ctx, q, owner, boardID, id)
+		return err
 	})
 	return c, err
 }
 
 // GetCard returns one card on one of the owner's boards.
 func (s *Store) GetCard(ctx context.Context, owner, boardID, id uuid.UUID) (Card, error) {
-	row, err := s.queries().GetCard(ctx, dbgen.GetCardParams{ID: id, BoardID: boardID, OwnerID: owner})
+	return readCard(ctx, s.queries(), owner, boardID, id)
+}
+
+// readCard reads one card on one of the owner's boards, with its labels.
+func readCard(ctx context.Context, q *dbgen.Queries, owner, boardID, id uuid.UUID) (Card, error) {
+	row, err := q.GetCard(ctx, dbgen.GetCardParams{ID: id, BoardID: boardID, OwnerID: owner})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Card{}, ErrCardNotFound
 	}
 	if err != nil {
 		return Card{}, err
 	}
-	return cardFromRow(row), nil
+	cards := []Card{cardFromRow(row)}
+	if err := attachLabels(ctx, q, boardID, cards); err != nil {
+		return Card{}, err
+	}
+	return cards[0], nil
 }
 
 // CardEdit is a partial edit: nil fields (and Due unless SetDue) are left
@@ -145,12 +151,8 @@ func (s *Store) EditCard(ctx context.Context, owner, boardID, id uuid.UUID, e Ca
 		if err != nil {
 			return fmt.Errorf("archive or restore card: %w", err)
 		}
-		row, err := q.GetCard(ctx, dbgen.GetCardParams{ID: id, BoardID: boardID, OwnerID: owner})
-		if err != nil {
-			return err
-		}
-		c = cardFromRow(row)
-		return nil
+		c, err = readCard(ctx, q, owner, boardID, id)
+		return err
 	})
 	return c, err
 }
@@ -208,12 +210,8 @@ func (s *Store) MoveCard(ctx context.Context, owner, boardID, id, column uuid.UU
 		if err := q.PlaceCard(ctx, dbgen.PlaceCardParams{ID: id, ColumnID: column, Position: pos}); err != nil {
 			return fmt.Errorf("place card: %w", err)
 		}
-		row, err := q.GetCard(ctx, dbgen.GetCardParams{ID: id, BoardID: boardID, OwnerID: owner})
-		if err != nil {
-			return err
-		}
-		c = cardFromRow(row)
-		return nil
+		c, err = readCard(ctx, q, owner, boardID, id)
+		return err
 	})
 	return c, err
 }
@@ -222,15 +220,29 @@ func (s *Store) MoveCard(ctx context.Context, owner, boardID, id, column uuid.UU
 // cards (most recently archived first) when archived is true.
 func (s *Store) ListCards(ctx context.Context, owner, boardID uuid.UUID, archived bool) ([]Card, error) {
 	q := s.queries()
-	if _, err := q.GetBoard(ctx, dbgen.GetBoardParams{ID: boardID, OwnerID: owner}); err != nil {
-		return nil, notFound(err)
+	if err := ownedBoard(ctx, q, owner, boardID); err != nil {
+		return nil, err
 	}
+	var cards []Card
 	if archived {
 		rows, err := q.ListArchivedCards(ctx, boardID)
-		return cardsFromRows(rows, func(r dbgen.ListArchivedCardsRow) dbgen.GetCardRow { return dbgen.GetCardRow(r) }), err
+		if err != nil {
+			return nil, err
+		}
+		cards = cardsFromRows(rows, func(r dbgen.ListArchivedCardsRow) dbgen.GetCardRow { return dbgen.GetCardRow(r) })
+	} else {
+		rows, err := q.ListBoardCards(ctx, boardID)
+		if err != nil {
+			return nil, err
+		}
+		cards = boardCards(rows)
 	}
-	rows, err := q.ListBoardCards(ctx, boardID)
-	return cardsFromRows(rows, func(r dbgen.ListBoardCardsRow) dbgen.GetCardRow { return dbgen.GetCardRow(r) }), err
+	return cards, attachLabels(ctx, q, boardID, cards)
+}
+
+// boardCards converts ListBoardCards rows.
+func boardCards(rows []dbgen.ListBoardCardsRow) []Card {
+	return cardsFromRows(rows, func(r dbgen.ListBoardCardsRow) dbgen.GetCardRow { return dbgen.GetCardRow(r) })
 }
 
 // cardsFromRows converts any card listing's rows, which share GetCard's

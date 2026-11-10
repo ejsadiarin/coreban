@@ -13,12 +13,13 @@ import (
 )
 
 type card struct {
-	ID          string `json:"id"`
-	BoardID     string `json:"board_id"`
-	ColumnID    string `json:"column_id"`
-	Status      string `json:"status"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
+	ID          string  `json:"id"`
+	BoardID     string  `json:"board_id"`
+	ColumnID    string  `json:"column_id"`
+	Status      string  `json:"status"`
+	Title       string  `json:"title"`
+	Description string  `json:"description"`
+	Labels      []label `json:"labels"`
 }
 
 func cardsPath(b board) string { return "/api/coreban/boards/" + b.ID + "/cards" }

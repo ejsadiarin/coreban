@@ -45,6 +45,12 @@ type Column struct {
 	Cards []Card `json:"cards"`
 }
 
+// Label is a named tag defined on one board and applied to its cards.
+type Label struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
 // Board is an owner's named collection of columns, private to that owner.
 type Board struct {
 	ID        uuid.UUID `json:"id"`
@@ -64,6 +70,8 @@ type Card struct {
 	Status      Status    `json:"status"`
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
+	// Labels are the board's labels applied to the card, by name.
+	Labels []Label `json:"labels"`
 	// Due is when the card is expected to be finished, if ever.
 	Due *Due `json:"due"`
 	// ArchivedAt is set while the card is archived: hidden from its board,

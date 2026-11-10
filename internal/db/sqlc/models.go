@@ -31,12 +31,24 @@ type Card struct {
 	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
 }
 
+type CardLabel struct {
+	CardID  uuid.UUID `json:"card_id"`
+	LabelID uuid.UUID `json:"label_id"`
+}
+
 type Column struct {
 	ID        uuid.UUID          `json:"id"`
 	BoardID   uuid.UUID          `json:"board_id"`
 	Name      string             `json:"name"`
 	Status    string             `json:"status"`
 	Position  int32              `json:"position"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type Label struct {
+	ID        uuid.UUID          `json:"id"`
+	BoardID   uuid.UUID          `json:"board_id"`
+	Name      string             `json:"name"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 

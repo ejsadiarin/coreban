@@ -157,6 +157,40 @@ GET {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/cards?archived=true
 
 DELETE {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/cards/PASTE_CARD_UUID_HERE
 
+# ─── Labels ────────────────────────────────────────────────────────────────
+# Labels belong to one board; names are unique on it, ignoring case (409).
+# Cards list their labels by name in "labels".
+
+### List a board's labels
+
+GET {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/labels
+
+### Add a label → 201
+
+POST {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/labels
+Content-Type: application/json
+
+{
+  "name": "k8s"
+}
+
+### Rename a label
+
+PATCH {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/labels/PASTE_LABEL_UUID_HERE
+Content-Type: application/json
+
+{
+  "name": "Kubernetes"
+}
+
+### Apply a label to a card → 204 (DELETE the same path removes it)
+
+PUT {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/cards/PASTE_CARD_UUID_HERE/labels/PASTE_LABEL_UUID_HERE
+
+### Delete a label, taking it off its cards → 204
+
+DELETE {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/labels/PASTE_LABEL_UUID_HERE
+
 # ─── Settings ──────────────────────────────────────────────────────────────
 # The owner's notification target (an ntfy topic name under coreban-, never
 # a URL) and IANA timezone. Defaults: no topic, UTC.

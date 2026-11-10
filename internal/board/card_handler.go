@@ -26,6 +26,8 @@ func (h *Handler) mountCards(r chi.Router) {
 	r.Patch("/{cardID}", h.editCard)
 	r.Delete("/{cardID}", h.deleteCard)
 	r.Post("/{cardID}/move", h.moveCard)
+	r.Put("/{cardID}/labels/{labelID}", h.setCardLabel(true))
+	r.Delete("/{cardID}/labels/{labelID}", h.setCardLabel(false))
 }
 
 type createCardRequest struct {

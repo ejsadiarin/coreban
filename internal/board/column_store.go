@@ -53,12 +53,12 @@ func columnWithCards(ctx context.Context, q *dbgen.Queries, boardID, id uuid.UUI
 		return Column{}, err
 	}
 	c := Column{ID: row.ID, Name: row.Name, Status: Status(row.Status), Position: row.Position, Cards: []Card{}}
-	for _, k := range cards {
+	for _, k := range boardCards(cards) {
 		if k.ColumnID == id {
-			c.Cards = append(c.Cards, cardFromRow(dbgen.GetCardRow(k)))
+			c.Cards = append(c.Cards, k)
 		}
 	}
-	return c, nil
+	return c, attachLabels(ctx, q, boardID, c.Cards)
 }
 
 // refuseLastOfStatus refuses to take col out of its status when it is the

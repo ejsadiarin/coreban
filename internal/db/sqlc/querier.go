@@ -13,7 +13,9 @@ import (
 
 type Querier interface {
 	AdvanceReminder(ctx context.Context, arg AdvanceReminderParams) error
+	ApplyLabel(ctx context.Context, arg ApplyLabelParams) error
 	ArchiveCard(ctx context.Context, id uuid.UUID) error
+	CardOnBoard(ctx context.Context, arg CardOnBoardParams) (uuid.UUID, error)
 	// The earliest occurrence whose moment has come, of an owner who has a
 	// notification target,
 	// locked for the claiming transaction; rows another dispatcher holds are
@@ -29,10 +31,12 @@ type Querier interface {
 	CreateBoard(ctx context.Context, arg CreateBoardParams) (CreateBoardRow, error)
 	CreateCard(ctx context.Context, arg CreateCardParams) error
 	CreateColumn(ctx context.Context, arg CreateColumnParams) error
+	CreateLabel(ctx context.Context, arg CreateLabelParams) error
 	CreateReminder(ctx context.Context, arg CreateReminderParams) error
 	DeleteBoard(ctx context.Context, arg DeleteBoardParams) (int64, error)
 	DeleteCard(ctx context.Context, arg DeleteCardParams) (int64, error)
 	DeleteColumn(ctx context.Context, arg DeleteColumnParams) error
+	DeleteLabel(ctx context.Context, arg DeleteLabelParams) (int64, error)
 	DeleteReminder(ctx context.Context, arg DeleteReminderParams) (int64, error)
 	// When the dispatcher next has something to send.
 	EarliestFireAt(ctx context.Context) (pgtype.Timestamptz, error)
@@ -43,8 +47,11 @@ type Querier interface {
 	// own row.
 	GetOwnerSettings(ctx context.Context, ownerID uuid.UUID) (GetOwnerSettingsRow, error)
 	GetReminder(ctx context.Context, arg GetReminderParams) (GetReminderRow, error)
+	LabelOnBoard(ctx context.Context, arg LabelOnBoardParams) (uuid.UUID, error)
 	// Most recently archived first.
 	ListArchivedCards(ctx context.Context, boardID uuid.UUID) ([]ListArchivedCardsRow, error)
+	// Every card's labels on the board, each card's by name.
+	ListBoardCardLabels(ctx context.Context, boardID uuid.UUID) ([]ListBoardCardLabelsRow, error)
 	// The board's cards in priority order; archived cards are left out.
 	ListBoardCards(ctx context.Context, boardID uuid.UUID) ([]ListBoardCardsRow, error)
 	ListBoards(ctx context.Context, ownerID uuid.UUID) ([]ListBoardsRow, error)
@@ -52,6 +59,9 @@ type Querier interface {
 	// archived cards (a restored card returns to the bottom).
 	ListColumnPositions(ctx context.Context, arg ListColumnPositionsParams) ([]ListColumnPositionsRow, error)
 	ListColumns(ctx context.Context, boardID uuid.UUID) ([]ListColumnsRow, error)
+	// Label statements take a board_id the caller has already resolved through
+	// an owner-scoped query (GetBoard), and are scoped by it.
+	ListLabels(ctx context.Context, boardID uuid.UUID) ([]ListLabelsRow, error)
 	// Soonest first; reminders with nothing left to send last.
 	ListOwnerReminders(ctx context.Context, ownerID uuid.UUID) ([]ListOwnerRemindersRow, error)
 	// Confirms the board is the owner's and serialises changes to its set of
@@ -73,7 +83,9 @@ type Querier interface {
 	PlaceCard(ctx context.Context, arg PlaceCardParams) error
 	PutOwnerSettings(ctx context.Context, arg PutOwnerSettingsParams) error
 	RecordDelivery(ctx context.Context, arg RecordDeliveryParams) error
+	RemoveLabel(ctx context.Context, arg RemoveLabelParams) error
 	RenameBoard(ctx context.Context, arg RenameBoardParams) (RenameBoardRow, error)
+	RenameLabel(ctx context.Context, arg RenameLabelParams) (int64, error)
 	// Spreads the column's cards (except the one being placed) back to 1..n
 	// in their current order. Only needed when repeated inserts between the
 	// same neighbours exhaust the gap between them.
