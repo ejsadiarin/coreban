@@ -63,16 +63,22 @@ occurrence goes out at most once (ADR-0002):
 - **On time**: sent at its moment.
 - **Missed** (coreban was down, or the owner had no notification target):
   a one-off is sent once when it can be, titled "Late reminder" with when
-  it was set for.
+  it was set for. A recurring reminder skips what it missed and carries on
+  from its next occurrence; nothing is replayed.
 - **ntfy not reachable yet** (down, or answering 5xx, after three quick
   tries): put back and retried every 30 seconds.
 - **Refused** (ntfy answered 4xx, such as 403 for a topic coreban's token
   can't write): not retried; the reminder's `last_delivery.error` says why,
   and rescheduling it re-arms it.
 
-`schedule.at` is an RFC 3339 instant, or a wall-clock time with no offset
-(`2026-11-10T07:00`) read in the owner's timezone; responses render times
-in that zone. An owner may have at most `REMINDER_CAP` reminders.
+A schedule is a one-off (`{"kind": "once", "at": …}`, an RFC 3339 instant
+or a wall-clock time with no offset read in the owner's timezone) or a
+recurring preset at a time of day in the owner's timezone: `daily`,
+`weekly` on `weekdays` (`MO` … `SU`), or `every` N `days` counting `from` a
+date. Recurring schedules are stored as an iCalendar RRULE with a floating
+DTSTART, so they follow the owner when they change timezone; daylight
+saving keeps them at their local time. Responses render times in the
+owner's zone. An owner may have at most `REMINDER_CAP` reminders.
 
 ## Queries
 

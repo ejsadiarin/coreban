@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,26 +25,72 @@ func timestamptz(t time.Time) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: t, Valid: true}
 }
 
-// view is how an owner sees their reminders: times in their zone, and
-// anything still to be sent paused while they have no notification target.
+// view is how an owner sees their reminders at a moment: times in their
+// zone, and anything still to be sent paused while they have no
+// notification target.
 type view struct {
 	loc      *time.Location
 	noTarget bool
+	now      time.Time
 }
 
-// fromRow renders a row as v shows it.
-func fromRow(r dbgen.GetReminderRow, v view) Reminder {
+// scheduleRow is a schedule as stored: a one-off's starts_at, or a
+// recurring rule with its next occurrence worked out in the owner's zone.
+type scheduleRow struct {
+	startsAt   pgtype.Timestamptz
+	rrule      pgtype.Text
+	localStart pgtype.Timestamp
+	next       pgtype.Timestamptz
+	nextTZ     pgtype.Text
+}
+
+// rowOf stores s for an owner seeing it as v.
+func rowOf(s Schedule, v view) scheduleRow {
+	if s.Kind == KindOnce {
+		return scheduleRow{startsAt: timestamptz(*s.At), next: timestamptz(*s.At)}
+	}
+	r := ruleOf(s, v.now.In(v.loc).Format(dateLayout))
+	return scheduleRow{
+		rrule:      pgtype.Text{String: r.rrule(), Valid: true},
+		localStart: pgtype.Timestamp{Time: r.start, Valid: true},
+		next:       timestamptz(r.next(v.now, v.loc)),
+		nextTZ:     pgtype.Text{String: v.loc.String(), Valid: true},
+	}
+}
+
+// fromRow renders a row as v shows it. A recurring reminder's next
+// occurrence is worked out afresh if the stored one is behind v's moment
+// or in a zone the owner has left.
+func fromRow(r dbgen.GetReminderRow, v view) (Reminder, error) {
 	loc := v.loc
 	out := Reminder{
 		ID:        r.ID,
 		Message:   r.Message,
-		Schedule:  Schedule{Kind: KindOnce, At: r.StartsAt.Time.In(loc)},
 		CreatedAt: r.CreatedAt.Time.In(loc),
 		UpdatedAt: r.UpdatedAt.Time.In(loc),
 	}
+	var next *time.Time
 	if r.NextFireAt.Valid {
-		next := r.NextFireAt.Time.In(loc)
-		out.NextFireAt = &next
+		n := r.NextFireAt.Time
+		next = &n
+	}
+	if r.Rrule.Valid {
+		rl, err := parseRule(r.Rrule.String, r.LocalStart.Time)
+		if err != nil {
+			return Reminder{}, err
+		}
+		out.Schedule = rl.schedule()
+		if next == nil || next.Before(v.now) || r.NextTz.String != loc.String() {
+			n := rl.next(v.now, loc)
+			next = &n
+		}
+	} else {
+		at := r.StartsAt.Time.In(loc)
+		out.Schedule = Schedule{Kind: KindOnce, At: &at}
+	}
+	if next != nil {
+		n := next.In(loc)
+		out.NextFireAt = &n
 		if v.noTarget {
 			reason := PausedNoTarget
 			out.Paused = &reason
@@ -56,12 +103,13 @@ func fromRow(r dbgen.GetReminderRow, v view) Reminder {
 		}
 		out.LastDelivery = &d
 	}
-	return out
+	return out, nil
 }
 
 // Create adds a reminder unless the owner already has limit of them.
-func (s *Store) Create(ctx context.Context, owner uuid.UUID, message string, sched Schedule, limit int) (uuid.UUID, error) {
+func (s *Store) Create(ctx context.Context, owner uuid.UUID, message string, sched Schedule, v view, limit int) (uuid.UUID, error) {
 	id := uuid.New()
+	row := rowOf(sched, v)
 	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
 		q := dbgen.New(tx)
 		if err := q.LockOwnerReminders(ctx, owner); err != nil {
@@ -75,7 +123,8 @@ func (s *Store) Create(ctx context.Context, owner uuid.UUID, message string, sch
 			return ErrCapReached
 		}
 		if err := q.CreateReminder(ctx, dbgen.CreateReminderParams{
-			ID: id, OwnerID: owner, Message: message, StartsAt: timestamptz(sched.At),
+			ID: id, OwnerID: owner, Message: message, StartsAt: row.startsAt, Rrule: row.rrule,
+			LocalStart: row.localStart, NextFireAt: row.next, NextTz: row.nextTZ,
 		}); err != nil {
 			return fmt.Errorf("insert reminder: %w", err)
 		}
@@ -93,10 +142,11 @@ func (s *Store) Get(ctx context.Context, owner, id uuid.UUID, v view) (Reminder,
 	if err != nil {
 		return Reminder{}, err
 	}
-	return fromRow(row, v), nil
+	return fromRow(row, v)
 }
 
-// List returns the owner's reminders as v shows them, soonest first.
+// List returns the owner's reminders as v shows them: soonest first, then
+// those with nothing left to send.
 func (s *Store) List(ctx context.Context, owner uuid.UUID, v view) ([]Reminder, error) {
 	rows, err := dbgen.New(s.Pool).ListOwnerReminders(ctx, owner)
 	if err != nil {
@@ -104,26 +154,41 @@ func (s *Store) List(ctx context.Context, owner uuid.UUID, v view) ([]Reminder, 
 	}
 	out := make([]Reminder, len(rows))
 	for i, r := range rows {
-		out[i] = fromRow(dbgen.GetReminderRow(r), v)
+		if out[i], err = fromRow(dbgen.GetReminderRow(r), v); err != nil {
+			return nil, err
+		}
 	}
+	slices.SortStableFunc(out, func(a, b Reminder) int {
+		switch {
+		case a.NextFireAt == nil && b.NextFireAt == nil:
+			return 0
+		case a.NextFireAt == nil:
+			return 1
+		case b.NextFireAt == nil:
+			return -1
+		}
+		return a.NextFireAt.Compare(*b.NextFireAt)
+	})
 	return out, nil
 }
 
 // Edit is a partial change: nil fields are left as they are. A new
-// schedule re-arms the reminder.
+// schedule replaces the old one and re-arms the reminder.
 type Edit struct {
 	Message  *string
 	Schedule *Schedule
 }
 
-// Edit applies e to one of the owner's reminders.
-func (s *Store) Edit(ctx context.Context, owner, id uuid.UUID, e Edit) error {
+// Edit applies e to one of the owner's reminders, seen as v.
+func (s *Store) Edit(ctx context.Context, owner, id uuid.UUID, e Edit, v view) error {
 	p := dbgen.UpdateReminderParams{ID: id, OwnerID: owner}
 	if e.Message != nil {
 		p.Message = pgtype.Text{String: *e.Message, Valid: true}
 	}
 	if e.Schedule != nil {
-		p.StartsAt = timestamptz(e.Schedule.At)
+		row := rowOf(*e.Schedule, v)
+		p.SetSchedule = true
+		p.StartsAt, p.Rrule, p.LocalStart, p.NextFireAt, p.NextTz = row.startsAt, row.rrule, row.localStart, row.next, row.nextTZ
 	}
 	return found(dbgen.New(s.Pool).UpdateReminder(ctx, p))
 }

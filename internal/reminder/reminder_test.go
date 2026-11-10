@@ -15,8 +15,12 @@ import (
 )
 
 type schedule struct {
-	Kind string `json:"kind"`
-	At   string `json:"at"`
+	Kind     string   `json:"kind"`
+	At       string   `json:"at"`
+	Time     string   `json:"time"`
+	Weekdays []string `json:"weekdays"`
+	Days     int      `json:"days"`
+	From     string   `json:"from"`
 }
 
 type delivery struct {
@@ -166,7 +170,7 @@ func TestEditingChangesTheMessageAndANewMomentRearmsIt(t *testing.T) {
 
 	rec := o.do(http.MethodPatch, path, map[string]any{"message": "water the ferns"})
 	expect(t, rec, http.StatusOK)
-	if got := decode[item](t, rec); got.Message != "water the ferns" || got.Schedule != r.Schedule {
+	if got := decode[item](t, rec); got.Message != "water the ferns" || got.Schedule.At != r.Schedule.At {
 		t.Errorf("after message edit: %+v, want new message, same schedule %+v", got, r.Schedule)
 	}
 
@@ -205,8 +209,8 @@ func TestRemindersAreRejectedWithAReasonTheOwnerCanFix(t *testing.T) {
 	}{
 		{"blank message", map[string]any{"message": "  ", "schedule": once(soon)}, "message is required"},
 		{"long message", map[string]any{"message": strings.Repeat("é", 1001), "schedule": once(soon)}, "message must be at most 1000 characters"},
-		{"no schedule", map[string]any{"message": "x"}, `schedule.kind must be "once"`},
-		{"unknown kind", map[string]any{"message": "x", "schedule": map[string]any{"kind": "hourly", "at": soon}}, `schedule.kind must be "once"`},
+		{"no schedule", map[string]any{"message": "x"}, `schedule.kind must be "once", "daily", "weekly", or "every"`},
+		{"unknown kind", map[string]any{"message": "x", "schedule": map[string]any{"kind": "hourly", "at": soon}}, `schedule.kind must be "once", "daily", "weekly", or "every"`},
 		{"not a moment", map[string]any{"message": "x", "schedule": once("tomorrow")}, "schedule.at must be a date and time such as 2026-11-10T07:00"},
 		{"in the past", map[string]any{"message": "x", "schedule": once("2020-01-01T07:00")}, "schedule.at must be in the future"},
 	}
@@ -220,7 +224,7 @@ func TestRemindersAreRejectedWithAReasonTheOwnerCanFix(t *testing.T) {
 	r := o.create("fine", soon)
 	rec := o.do(http.MethodPatch, reminders+"/"+r.ID, map[string]any{"schedule": once("2020-01-01T07:00")})
 	expect(t, rec, http.StatusBadRequest)
-	if got := o.list(); len(got) != 1 || got[0].Schedule != r.Schedule {
+	if got := o.list(); len(got) != 1 || got[0].Schedule.At != r.Schedule.At {
 		t.Errorf("a rejected edit changed the reminder: %+v", got)
 	}
 }

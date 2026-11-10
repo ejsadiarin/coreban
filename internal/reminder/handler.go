@@ -58,7 +58,7 @@ func (h *Handler) ownerView(ctx context.Context, owner uuid.UUID) (view, error) 
 	if err != nil {
 		return view{}, fmt.Errorf("owner timezone %q: %w", s.Timezone, err)
 	}
-	return view{loc: loc, noTarget: s.NtfyTopic == nil}, nil
+	return view{loc: loc, noTarget: s.NtfyTopic == nil, now: h.Now()}, nil
 }
 
 func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -162,11 +162,11 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	if h.respondError(w, err, "") {
 		return
 	}
-	sched, err := parseSchedule(req.Schedule, v.loc, h.Now())
+	sched, err := parseSchedule(req.Schedule, v.loc, v.now)
 	if h.respondError(w, err, "") {
 		return
 	}
-	id, err := h.Store.Create(r.Context(), owner, msg, sched, h.Cap)
+	id, err := h.Store.Create(r.Context(), owner, msg, sched, v, h.Cap)
 	if h.respondError(w, err, "failed to create reminder") {
 		return
 	}
@@ -206,13 +206,13 @@ func (h *Handler) edit(w http.ResponseWriter, r *http.Request) {
 		e.Message = &msg
 	}
 	if req.Schedule != nil {
-		sched, err := parseSchedule(*req.Schedule, v.loc, h.Now())
+		sched, err := parseSchedule(*req.Schedule, v.loc, v.now)
 		if h.respondError(w, err, "") {
 			return
 		}
 		e.Schedule = &sched
 	}
-	if h.respondError(w, h.Store.Edit(r.Context(), owner, id, e), "failed to edit reminder") {
+	if h.respondError(w, h.Store.Edit(r.Context(), owner, id, e, v), "failed to edit reminder") {
 		return
 	}
 	if e.Schedule != nil {

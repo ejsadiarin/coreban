@@ -10,12 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-
-	"github.com/ejsadiarin/coreban/internal/moment"
 )
-
-// KindOnce is the one-off schedule: fire once, at a moment.
-const KindOnce = "once"
 
 // PausedNoTarget says a reminder will not be sent until its owner sets a
 // notification target.
@@ -28,12 +23,6 @@ const DefaultCap = 100
 // maxMessageLen keeps a message well inside one ntfy notification (ntfy
 // turns bodies over 4096 bytes into attachments).
 const maxMessageLen = 1000
-
-// Schedule is when a reminder fires. Only one-off (KindOnce) exists so far.
-type Schedule struct {
-	Kind string    `json:"kind"`
-	At   time.Time `json:"at"`
-}
 
 // Delivery is the latest send of a reminder: when it went out, whether it
 // was sent after its moment had passed, and why it failed if it did.
@@ -74,29 +63,6 @@ func normalizeMessage(raw string) (string, error) {
 		return "", errInvalid(fmt.Sprintf("message must be at most %d characters", maxMessageLen))
 	}
 	return msg, nil
-}
-
-// scheduleRequest is a schedule as clients send it. At is an RFC 3339
-// instant, or a wall-clock time with no offset read in the owner's
-// timezone ("2026-11-10T07:00").
-type scheduleRequest struct {
-	Kind string `json:"kind"`
-	At   string `json:"at"`
-}
-
-// parseSchedule validates a requested schedule for an owner in loc, now.
-func parseSchedule(req scheduleRequest, loc *time.Location, now time.Time) (Schedule, error) {
-	if req.Kind != KindOnce {
-		return Schedule{}, errInvalid(`schedule.kind must be "once"`)
-	}
-	at, ok := moment.Parse(strings.TrimSpace(req.At), loc)
-	if !ok {
-		return Schedule{}, errInvalid("schedule.at must be a date and time such as 2026-11-10T07:00")
-	}
-	if !at.After(now) {
-		return Schedule{}, errInvalid("schedule.at must be in the future")
-	}
-	return Schedule{Kind: KindOnce, At: at}, nil
 }
 
 // ErrNotFound is returned for a reminder the owner doesn't have. It never

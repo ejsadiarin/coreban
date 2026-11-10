@@ -16,10 +16,10 @@ type Querier interface {
 	ApplyLabel(ctx context.Context, arg ApplyLabelParams) error
 	ArchiveCard(ctx context.Context, id uuid.UUID) error
 	CardOnBoard(ctx context.Context, arg CardOnBoardParams) (uuid.UUID, error)
-	// The earliest occurrence whose moment has come, of an owner who has a
-	// notification target,
-	// locked for the claiming transaction; rows another dispatcher holds are
-	// skipped.
+	// The earliest reminder of an owner with a notification target whose
+	// moment has come, or (recurring) whose next occurrence was worked out in a
+	// timezone the owner has since left. Locked for the claiming transaction;
+	// rows another dispatcher holds are skipped.
 	ClaimOccurrence(ctx context.Context, now pgtype.Timestamptz) (ClaimOccurrenceRow, error)
 	// Every card counts, archived or not.
 	CountColumnCards(ctx context.Context, columnID uuid.UUID) (int64, error)
@@ -62,7 +62,6 @@ type Querier interface {
 	// Label statements take a board_id the caller has already resolved through
 	// an owner-scoped query (GetBoard), and are scoped by it.
 	ListLabels(ctx context.Context, boardID uuid.UUID) ([]ListLabelsRow, error)
-	// Soonest first; reminders with nothing left to send last.
 	ListOwnerReminders(ctx context.Context, ownerID uuid.UUID) ([]ListOwnerRemindersRow, error)
 	// Confirms the board is the owner's and serialises changes to its set of
 	// columns (the per-status invariant) for the rest of the transaction.
@@ -99,7 +98,7 @@ type Querier interface {
 	// set_due replaces the due (both fields; NULLs clear it), else it's kept.
 	UpdateCard(ctx context.Context, arg UpdateCardParams) (int64, error)
 	UpdateColumn(ctx context.Context, arg UpdateColumnParams) error
-	// A new starts_at re-arms the reminder at that moment.
+	// set_schedule replaces the whole schedule, re-arming the reminder.
 	UpdateReminder(ctx context.Context, arg UpdateReminderParams) (int64, error)
 }
 

@@ -13,48 +13,60 @@ import (
 )
 
 const advanceReminder = `-- name: AdvanceReminder :exec
-UPDATE reminders SET next_fire_at = $1 WHERE id = $2
+UPDATE reminders
+SET next_fire_at = $1, next_tz = $2
+WHERE id = $3
 `
 
 type AdvanceReminderParams struct {
 	NextFireAt pgtype.Timestamptz `json:"next_fire_at"`
+	NextTz     pgtype.Text        `json:"next_tz"`
 	ID         uuid.UUID          `json:"id"`
 }
 
 func (q *Queries) AdvanceReminder(ctx context.Context, arg AdvanceReminderParams) error {
-	_, err := q.db.Exec(ctx, advanceReminder, arg.NextFireAt, arg.ID)
+	_, err := q.db.Exec(ctx, advanceReminder, arg.NextFireAt, arg.NextTz, arg.ID)
 	return err
 }
 
 const claimOccurrence = `-- name: ClaimOccurrence :one
-SELECT r.id, r.message, r.next_fire_at, s.ntfy_topic, s.timezone
+SELECT r.id, r.message, r.rrule, r.local_start, r.next_fire_at, r.next_tz, r.last_delivery_at, s.ntfy_topic, s.timezone
 FROM reminders r
 JOIN owner_settings s ON s.owner_id = r.owner_id
-WHERE r.next_fire_at <= $1 AND s.ntfy_topic IS NOT NULL
+WHERE s.ntfy_topic IS NOT NULL
+  AND (r.next_fire_at <= $1 OR r.next_tz <> s.timezone)
 ORDER BY r.next_fire_at, r.id
 LIMIT 1
 FOR UPDATE OF r SKIP LOCKED
 `
 
 type ClaimOccurrenceRow struct {
-	ID         uuid.UUID          `json:"id"`
-	Message    string             `json:"message"`
-	NextFireAt pgtype.Timestamptz `json:"next_fire_at"`
-	NtfyTopic  pgtype.Text        `json:"ntfy_topic"`
-	Timezone   string             `json:"timezone"`
+	ID             uuid.UUID          `json:"id"`
+	Message        string             `json:"message"`
+	Rrule          pgtype.Text        `json:"rrule"`
+	LocalStart     pgtype.Timestamp   `json:"local_start"`
+	NextFireAt     pgtype.Timestamptz `json:"next_fire_at"`
+	NextTz         pgtype.Text        `json:"next_tz"`
+	LastDeliveryAt pgtype.Timestamptz `json:"last_delivery_at"`
+	NtfyTopic      pgtype.Text        `json:"ntfy_topic"`
+	Timezone       string             `json:"timezone"`
 }
 
-// The earliest occurrence whose moment has come, of an owner who has a
-// notification target,
-// locked for the claiming transaction; rows another dispatcher holds are
-// skipped.
+// The earliest reminder of an owner with a notification target whose
+// moment has come, or (recurring) whose next occurrence was worked out in a
+// timezone the owner has since left. Locked for the claiming transaction;
+// rows another dispatcher holds are skipped.
 func (q *Queries) ClaimOccurrence(ctx context.Context, now pgtype.Timestamptz) (ClaimOccurrenceRow, error) {
 	row := q.db.QueryRow(ctx, claimOccurrence, now)
 	var i ClaimOccurrenceRow
 	err := row.Scan(
 		&i.ID,
 		&i.Message,
+		&i.Rrule,
+		&i.LocalStart,
 		&i.NextFireAt,
+		&i.NextTz,
+		&i.LastDeliveryAt,
 		&i.NtfyTopic,
 		&i.Timezone,
 	)
@@ -73,15 +85,19 @@ func (q *Queries) CountOwnerReminders(ctx context.Context, ownerID uuid.UUID) (i
 }
 
 const createReminder = `-- name: CreateReminder :exec
-INSERT INTO reminders (id, owner_id, message, starts_at, next_fire_at)
-VALUES ($1, $2, $3, $4, $4)
+INSERT INTO reminders (id, owner_id, message, starts_at, rrule, local_start, next_fire_at, next_tz)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type CreateReminderParams struct {
-	ID       uuid.UUID          `json:"id"`
-	OwnerID  uuid.UUID          `json:"owner_id"`
-	Message  string             `json:"message"`
-	StartsAt pgtype.Timestamptz `json:"starts_at"`
+	ID         uuid.UUID          `json:"id"`
+	OwnerID    uuid.UUID          `json:"owner_id"`
+	Message    string             `json:"message"`
+	StartsAt   pgtype.Timestamptz `json:"starts_at"`
+	Rrule      pgtype.Text        `json:"rrule"`
+	LocalStart pgtype.Timestamp   `json:"local_start"`
+	NextFireAt pgtype.Timestamptz `json:"next_fire_at"`
+	NextTz     pgtype.Text        `json:"next_tz"`
 }
 
 func (q *Queries) CreateReminder(ctx context.Context, arg CreateReminderParams) error {
@@ -90,6 +106,10 @@ func (q *Queries) CreateReminder(ctx context.Context, arg CreateReminderParams) 
 		arg.OwnerID,
 		arg.Message,
 		arg.StartsAt,
+		arg.Rrule,
+		arg.LocalStart,
+		arg.NextFireAt,
+		arg.NextTz,
 	)
 	return err
 }
@@ -127,7 +147,7 @@ func (q *Queries) EarliestFireAt(ctx context.Context) (pgtype.Timestamptz, error
 }
 
 const getReminder = `-- name: GetReminder :one
-SELECT id, message, starts_at, next_fire_at,
+SELECT id, message, starts_at, rrule, local_start, next_fire_at, next_tz,
        last_delivery_at, last_delivery_late, last_delivery_error,
        created_at, updated_at
 FROM reminders
@@ -143,7 +163,10 @@ type GetReminderRow struct {
 	ID                uuid.UUID          `json:"id"`
 	Message           string             `json:"message"`
 	StartsAt          pgtype.Timestamptz `json:"starts_at"`
+	Rrule             pgtype.Text        `json:"rrule"`
+	LocalStart        pgtype.Timestamp   `json:"local_start"`
 	NextFireAt        pgtype.Timestamptz `json:"next_fire_at"`
+	NextTz            pgtype.Text        `json:"next_tz"`
 	LastDeliveryAt    pgtype.Timestamptz `json:"last_delivery_at"`
 	LastDeliveryLate  bool               `json:"last_delivery_late"`
 	LastDeliveryError pgtype.Text        `json:"last_delivery_error"`
@@ -158,7 +181,10 @@ func (q *Queries) GetReminder(ctx context.Context, arg GetReminderParams) (GetRe
 		&i.ID,
 		&i.Message,
 		&i.StartsAt,
+		&i.Rrule,
+		&i.LocalStart,
 		&i.NextFireAt,
+		&i.NextTz,
 		&i.LastDeliveryAt,
 		&i.LastDeliveryLate,
 		&i.LastDeliveryError,
@@ -169,19 +195,22 @@ func (q *Queries) GetReminder(ctx context.Context, arg GetReminderParams) (GetRe
 }
 
 const listOwnerReminders = `-- name: ListOwnerReminders :many
-SELECT id, message, starts_at, next_fire_at,
+SELECT id, message, starts_at, rrule, local_start, next_fire_at, next_tz,
        last_delivery_at, last_delivery_late, last_delivery_error,
        created_at, updated_at
 FROM reminders
 WHERE owner_id = $1
-ORDER BY next_fire_at NULLS LAST, created_at, id
+ORDER BY created_at, id
 `
 
 type ListOwnerRemindersRow struct {
 	ID                uuid.UUID          `json:"id"`
 	Message           string             `json:"message"`
 	StartsAt          pgtype.Timestamptz `json:"starts_at"`
+	Rrule             pgtype.Text        `json:"rrule"`
+	LocalStart        pgtype.Timestamp   `json:"local_start"`
 	NextFireAt        pgtype.Timestamptz `json:"next_fire_at"`
+	NextTz            pgtype.Text        `json:"next_tz"`
 	LastDeliveryAt    pgtype.Timestamptz `json:"last_delivery_at"`
 	LastDeliveryLate  bool               `json:"last_delivery_late"`
 	LastDeliveryError pgtype.Text        `json:"last_delivery_error"`
@@ -189,7 +218,6 @@ type ListOwnerRemindersRow struct {
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
-// Soonest first; reminders with nothing left to send last.
 func (q *Queries) ListOwnerReminders(ctx context.Context, ownerID uuid.UUID) ([]ListOwnerRemindersRow, error) {
 	rows, err := q.db.Query(ctx, listOwnerReminders, ownerID)
 	if err != nil {
@@ -203,7 +231,10 @@ func (q *Queries) ListOwnerReminders(ctx context.Context, ownerID uuid.UUID) ([]
 			&i.ID,
 			&i.Message,
 			&i.StartsAt,
+			&i.Rrule,
+			&i.LocalStart,
 			&i.NextFireAt,
+			&i.NextTz,
 			&i.LastDeliveryAt,
 			&i.LastDeliveryLate,
 			&i.LastDeliveryError,
@@ -261,44 +292,55 @@ func (q *Queries) RecordDelivery(ctx context.Context, arg RecordDeliveryParams) 
 
 const restoreReminder = `-- name: RestoreReminder :exec
 UPDATE reminders SET next_fire_at = $1
-WHERE id = $2 AND next_fire_at IS NOT DISTINCT FROM $3
+WHERE id = $2 AND rrule IS NULL AND next_fire_at IS NULL
 `
 
 type RestoreReminderParams struct {
 	Occurrence pgtype.Timestamptz `json:"occurrence"`
 	ID         uuid.UUID          `json:"id"`
-	AdvancedTo pgtype.Timestamptz `json:"advanced_to"`
 }
 
 // Puts back an occurrence a send could not deliver yet, unless the owner
 // has rescheduled the reminder since it was claimed.
 func (q *Queries) RestoreReminder(ctx context.Context, arg RestoreReminderParams) error {
-	_, err := q.db.Exec(ctx, restoreReminder, arg.Occurrence, arg.ID, arg.AdvancedTo)
+	_, err := q.db.Exec(ctx, restoreReminder, arg.Occurrence, arg.ID)
 	return err
 }
 
 const updateReminder = `-- name: UpdateReminder :execrows
 UPDATE reminders
 SET message = COALESCE($1, message),
-    starts_at = COALESCE($2, starts_at),
-    next_fire_at = CASE WHEN $2::timestamptz IS NULL THEN next_fire_at
-                        ELSE $2 END,
+    starts_at = CASE WHEN $2::boolean THEN $3::timestamptz ELSE starts_at END,
+    rrule = CASE WHEN $2::boolean THEN $4::text ELSE rrule END,
+    local_start = CASE WHEN $2::boolean THEN $5::timestamp ELSE local_start END,
+    next_fire_at = CASE WHEN $2::boolean THEN $6::timestamptz ELSE next_fire_at END,
+    next_tz = CASE WHEN $2::boolean THEN $7::text ELSE next_tz END,
     updated_at = now()
-WHERE id = $3 AND owner_id = $4
+WHERE id = $8 AND owner_id = $9
 `
 
 type UpdateReminderParams struct {
-	Message  pgtype.Text        `json:"message"`
-	StartsAt pgtype.Timestamptz `json:"starts_at"`
-	ID       uuid.UUID          `json:"id"`
-	OwnerID  uuid.UUID          `json:"owner_id"`
+	Message     pgtype.Text        `json:"message"`
+	SetSchedule bool               `json:"set_schedule"`
+	StartsAt    pgtype.Timestamptz `json:"starts_at"`
+	Rrule       pgtype.Text        `json:"rrule"`
+	LocalStart  pgtype.Timestamp   `json:"local_start"`
+	NextFireAt  pgtype.Timestamptz `json:"next_fire_at"`
+	NextTz      pgtype.Text        `json:"next_tz"`
+	ID          uuid.UUID          `json:"id"`
+	OwnerID     uuid.UUID          `json:"owner_id"`
 }
 
-// A new starts_at re-arms the reminder at that moment.
+// set_schedule replaces the whole schedule, re-arming the reminder.
 func (q *Queries) UpdateReminder(ctx context.Context, arg UpdateReminderParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateReminder,
 		arg.Message,
+		arg.SetSchedule,
 		arg.StartsAt,
+		arg.Rrule,
+		arg.LocalStart,
+		arg.NextFireAt,
+		arg.NextTz,
 		arg.ID,
 		arg.OwnerID,
 	)

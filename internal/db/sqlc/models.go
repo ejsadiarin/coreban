@@ -70,4 +70,7 @@ type Reminder struct {
 	LastDeliveryError pgtype.Text        `json:"last_delivery_error"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	Rrule             pgtype.Text        `json:"rrule"`
+	LocalStart        pgtype.Timestamp   `json:"local_start"`
+	NextTz            pgtype.Text        `json:"next_tz"`
 }

@@ -120,23 +120,32 @@ func (d *Dispatcher) Tick(ctx context.Context) error {
 		if err != nil || !ok {
 			return err
 		}
+		if !c.send {
+			continue
+		}
 		if err := d.deliver(ctx, c, now); err != nil {
 			return err
 		}
 	}
 }
 
-// claimed is one occurrence this dispatcher alone now owns.
+// claimed is one occurrence this dispatcher alone now owns. send is false
+// when claiming only moved a recurring reminder on (past missed
+// occurrences, or into the owner's new timezone) with nothing to send.
 type claimed struct {
 	id      uuid.UUID
 	message string
 	topic   string
 	at      time.Time
+	once    bool
+	send    bool
 }
 
-// claim takes the earliest occurrence whose moment has come and advances
-// its reminder past it, committing before anything is sent. A one-off has
-// nothing after it.
+// claim takes the earliest reminder due for attention and advances it past
+// the occurrence being sent, committing before anything is sent. A one-off
+// has nothing after it. A recurring reminder skips occurrences missed by
+// more than lateAfter and moves to the next one; that is the one sent if
+// its moment has come.
 func (d *Dispatcher) claim(ctx context.Context, now time.Time) (claimed, bool, error) {
 	var c claimed
 	found := false
@@ -149,15 +158,41 @@ func (d *Dispatcher) claim(ctx context.Context, now time.Time) (claimed, bool, e
 		if err != nil {
 			return fmt.Errorf("claim occurrence: %w", err)
 		}
-		if err := q.AdvanceReminder(ctx, dbgen.AdvanceReminderParams{ID: row.ID}); err != nil {
-			return fmt.Errorf("advance reminder: %w", err)
-		}
 		loc, err := time.LoadLocation(row.Timezone)
 		if err != nil {
 			loc = time.UTC
 		}
 		c = claimed{id: row.ID, message: row.Message, topic: row.NtfyTopic.String, at: row.NextFireAt.Time.In(loc)}
 		found = true
+		advance := dbgen.AdvanceReminderParams{ID: row.ID}
+		if !row.Rrule.Valid {
+			c.once, c.send = true, true
+		} else {
+			r, err := parseRule(row.Rrule.String, row.LocalStart.Time)
+			if err != nil {
+				return fmt.Errorf("reminder %s: %w", row.ID, err)
+			}
+			// From the stored occurrence, unless it was missed or worked out
+			// in a zone the owner has left; never at or before the last
+			// send, so moving zones can't repeat it.
+			from := now.Add(-lateAfter)
+			if row.NextTz.String == row.Timezone && row.NextFireAt.Time.After(from) {
+				from = row.NextFireAt.Time
+			}
+			if row.LastDeliveryAt.Valid && !from.After(row.LastDeliveryAt.Time) {
+				from = row.LastDeliveryAt.Time.Add(time.Second)
+			}
+			c.at = r.next(from, loc)
+			next := c.at
+			if c.send = !c.at.After(now); c.send {
+				next = r.next(c.at.Add(time.Second), loc)
+			}
+			advance.NextFireAt = timestamptz(next)
+			advance.NextTz = pgtype.Text{String: row.Timezone, Valid: true}
+		}
+		if err := q.AdvanceReminder(ctx, advance); err != nil {
+			return fmt.Errorf("advance reminder: %w", err)
+		}
 		return nil
 	})
 	return c, found, err
@@ -172,11 +207,14 @@ func (d *Dispatcher) deliver(ctx context.Context, c claimed, now time.Time) erro
 	err := d.notifier.Notify(ctx, Notification{Topic: c.topic, Message: c.message, At: c.at, Late: late})
 	if errors.Is(err, ErrRetryLater) {
 		// A one-off was advanced to nothing (NULL); put it back unless the
-		// owner has rescheduled it since.
-		if rerr := dbgen.New(d.pool).RestoreReminder(ctx, dbgen.RestoreReminderParams{
-			ID: c.id, Occurrence: timestamptz(c.at),
-		}); rerr != nil {
-			return fmt.Errorf("put back %s: %w", c.id, rerr)
+		// owner has rescheduled it since. A recurring occurrence is let go,
+		// like any other it misses.
+		if c.once {
+			if rerr := dbgen.New(d.pool).RestoreReminder(ctx, dbgen.RestoreReminderParams{
+				ID: c.id, Occurrence: timestamptz(c.at),
+			}); rerr != nil {
+				return fmt.Errorf("put back %s: %w", c.id, rerr)
+			}
 		}
 		return err
 	}

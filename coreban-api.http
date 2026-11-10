@@ -230,7 +230,27 @@ Content-Type: application/json
   "schedule": { "kind": "once", "at": "2026-12-01T09:00" }
 }
 
-### Edit the message and/or reschedule (a new moment re-arms it)
+### Create a recurring reminder: daily, weekly on chosen days, or every N days
+
+POST {{host}}/api/coreban/reminders
+Content-Type: application/json
+
+{
+  "message": "CKA drills",
+  "schedule": { "kind": "weekly", "weekdays": ["MO", "WE", "FR"], "time": "19:30" }
+}
+
+### Every 3 days at 08:00, counting from a date (defaults to today)
+
+POST {{host}}/api/coreban/reminders
+Content-Type: application/json
+
+{
+  "message": "Shell drills: ps | awk",
+  "schedule": { "kind": "every", "days": 3, "from": "2026-11-10", "time": "08:00" }
+}
+
+### Edit the message and/or reschedule (a new schedule re-arms it)
 
 PATCH {{host}}/api/coreban/reminders/PASTE_REMINDER_UUID_HERE
 Content-Type: application/json
