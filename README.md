@@ -2,7 +2,54 @@
 
 Kanban boards and ntfy reminders, served as a downstream service behind
 [coregateway](https://github.com/ejsadiarin/coregateway). Vocabulary:
-`CONTEXT.md`; decisions: `docs/adr/`.
+`CONTEXT.md`; decisions: `docs/adr/`. The dashboard's **Kanban** section
+(`web/` in coregateway) is its UI.
+
+## Features
+
+**Boards and columns**
+- Private boards per owner; a new board starts with Todo, Doing, and Done.
+- Columns are owner-defined stages, each belonging to one status — Todo,
+  In progress, or Done. A card's status always follows its column
+  (ADR-0001), so "completed" means "in a Done column".
+- Add, rename, reorder, and re-status columns. A board always keeps at
+  least one column per status, and a column holding any card (archived
+  ones included) can't be deleted.
+
+**Cards**
+- A title and a markdown description, in a column; drag between and within
+  columns (position is priority — no separate priority field).
+- An optional **due**: a calendar date, or a date and time read in the
+  owner's timezone. It reads back as whichever was set.
+- **Archive** hides a card without losing it (listable, restorable to the
+  bottom of its column); **delete** is permanent and takes the card's
+  labels and reminders with it.
+
+**Labels**
+- Defined per board (names unique on it, ignoring case), applied to that
+  board's cards; deleting a label takes it off its cards.
+
+**Reminders** (pushed through ntfy)
+- One-off at a moment, or recurring: daily, on chosen weekdays, or every N
+  days — at a time of day in the owner's timezone, across daylight saving.
+- Optionally about a card, with a one-click "remind me at due". A card's
+  reminders stay quiet while it is Done or archived and carry on after.
+- Missed one-offs arrive once, marked late; missed recurring occurrences
+  are skipped, never replayed. Nothing is ever sent twice (ADR-0002).
+- A per-owner cap (`REMINDER_CAP`) keeps one account from flooding ntfy.
+
+**Notification target and timezone**
+- Each owner sets their ntfy topic (always `coreban-…`, never a URL, one
+  owner per topic) and IANA timezone. Without a topic nothing is sent, and
+  the reminder list says why.
+
+**Access**
+- Only the gateway's internal token (audience `coreban`) is accepted;
+  coreban fails closed if it can't fetch the gateway's signing keys.
+- Every query is scoped to the owner. API keys scoped `coreban:read` /
+  `coreban:write` work through the gateway; an admin's targeted read
+  (`act_as`) sees another owner's data, but writes always bind to the
+  caller.
 
 ## Running
 
