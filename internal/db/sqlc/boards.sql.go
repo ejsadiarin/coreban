@@ -12,6 +12,34 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countColumnCards = `-- name: CountColumnCards :one
+SELECT count(*) FROM cards WHERE column_id = $1
+`
+
+// Every card counts, archived or not.
+func (q *Queries) CountColumnCards(ctx context.Context, columnID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countColumnCards, columnID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countStatusColumns = `-- name: CountStatusColumns :one
+SELECT count(*) FROM columns WHERE board_id = $1 AND status = $2
+`
+
+type CountStatusColumnsParams struct {
+	BoardID uuid.UUID `json:"board_id"`
+	Status  string    `json:"status"`
+}
+
+func (q *Queries) CountStatusColumns(ctx context.Context, arg CountStatusColumnsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countStatusColumns, arg.BoardID, arg.Status)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createBoard = `-- name: CreateBoard :one
 
 INSERT INTO boards (id, owner_id, name)
@@ -82,6 +110,20 @@ func (q *Queries) DeleteBoard(ctx context.Context, arg DeleteBoardParams) (int64
 	return result.RowsAffected(), nil
 }
 
+const deleteColumn = `-- name: DeleteColumn :exec
+DELETE FROM columns WHERE id = $1 AND board_id = $2
+`
+
+type DeleteColumnParams struct {
+	ID      uuid.UUID `json:"id"`
+	BoardID uuid.UUID `json:"board_id"`
+}
+
+func (q *Queries) DeleteColumn(ctx context.Context, arg DeleteColumnParams) error {
+	_, err := q.db.Exec(ctx, deleteColumn, arg.ID, arg.BoardID)
+	return err
+}
+
 const getBoard = `-- name: GetBoard :one
 SELECT name, created_at, updated_at
 FROM boards
@@ -103,6 +145,36 @@ func (q *Queries) GetBoard(ctx context.Context, arg GetBoardParams) (GetBoardRow
 	row := q.db.QueryRow(ctx, getBoard, arg.ID, arg.OwnerID)
 	var i GetBoardRow
 	err := row.Scan(&i.Name, &i.CreatedAt, &i.UpdatedAt)
+	return i, err
+}
+
+const getColumn = `-- name: GetColumn :one
+SELECT id, name, status, position
+FROM columns
+WHERE id = $1 AND board_id = $2
+`
+
+type GetColumnParams struct {
+	ID      uuid.UUID `json:"id"`
+	BoardID uuid.UUID `json:"board_id"`
+}
+
+type GetColumnRow struct {
+	ID       uuid.UUID `json:"id"`
+	Name     string    `json:"name"`
+	Status   string    `json:"status"`
+	Position int32     `json:"position"`
+}
+
+func (q *Queries) GetColumn(ctx context.Context, arg GetColumnParams) (GetColumnRow, error) {
+	row := q.db.QueryRow(ctx, getColumn, arg.ID, arg.BoardID)
+	var i GetColumnRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Status,
+		&i.Position,
+	)
 	return i, err
 }
 
@@ -184,6 +256,37 @@ func (q *Queries) ListColumns(ctx context.Context, boardID uuid.UUID) ([]ListCol
 	return items, nil
 }
 
+const lockOwnedBoard = `-- name: LockOwnedBoard :one
+SELECT id FROM boards WHERE id = $1 AND owner_id = $2 FOR UPDATE
+`
+
+type LockOwnedBoardParams struct {
+	ID      uuid.UUID `json:"id"`
+	OwnerID uuid.UUID `json:"owner_id"`
+}
+
+// Confirms the board is the owner's and serialises changes to its set of
+// columns (the per-status invariant) for the rest of the transaction.
+func (q *Queries) LockOwnedBoard(ctx context.Context, arg LockOwnedBoardParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockOwnedBoard, arg.ID, arg.OwnerID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const nextColumnPosition = `-- name: NextColumnPosition :one
+SELECT (COALESCE(max(position), -1) + 1)::integer
+FROM columns
+WHERE board_id = $1
+`
+
+func (q *Queries) NextColumnPosition(ctx context.Context, boardID uuid.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, nextColumnPosition, boardID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const renameBoard = `-- name: RenameBoard :one
 UPDATE boards
 SET name = $3, updated_at = now()
@@ -207,4 +310,43 @@ func (q *Queries) RenameBoard(ctx context.Context, arg RenameBoardParams) (Renam
 	var i RenameBoardRow
 	err := row.Scan(&i.CreatedAt, &i.UpdatedAt)
 	return i, err
+}
+
+const setColumnPosition = `-- name: SetColumnPosition :exec
+UPDATE columns SET position = $3 WHERE id = $1 AND board_id = $2
+`
+
+type SetColumnPositionParams struct {
+	ID       uuid.UUID `json:"id"`
+	BoardID  uuid.UUID `json:"board_id"`
+	Position int32     `json:"position"`
+}
+
+func (q *Queries) SetColumnPosition(ctx context.Context, arg SetColumnPositionParams) error {
+	_, err := q.db.Exec(ctx, setColumnPosition, arg.ID, arg.BoardID, arg.Position)
+	return err
+}
+
+const updateColumn = `-- name: UpdateColumn :exec
+UPDATE columns
+SET name = COALESCE($1, name),
+    status = COALESCE($2, status)
+WHERE id = $3 AND board_id = $4
+`
+
+type UpdateColumnParams struct {
+	Name    pgtype.Text `json:"name"`
+	Status  pgtype.Text `json:"status"`
+	ID      uuid.UUID   `json:"id"`
+	BoardID uuid.UUID   `json:"board_id"`
+}
+
+func (q *Queries) UpdateColumn(ctx context.Context, arg UpdateColumnParams) error {
+	_, err := q.db.Exec(ctx, updateColumn,
+		arg.Name,
+		arg.Status,
+		arg.ID,
+		arg.BoardID,
+	)
+	return err
 }

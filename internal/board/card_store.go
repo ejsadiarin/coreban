@@ -17,8 +17,8 @@ import (
 // else's".
 var ErrCardNotFound = errors.New("card not found")
 
-// ErrColumnNotFound is returned when a card names a column that is not on
-// the board.
+// ErrColumnNotFound is returned for a column that is not on the board: one
+// a card names, or one being changed.
 var ErrColumnNotFound = errors.New("column not found on this board")
 
 func cardFromRow(r dbgen.GetCardRow) Card {

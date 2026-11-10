@@ -12,9 +12,9 @@ import (
 	"github.com/ejsadiarin/coreban/internal/helper"
 )
 
-// maxCardBody bounds card request bodies; a markdown description is the
-// largest thing they carry.
-const maxCardBody = 256 << 10
+// maxBoardRequestBody bounds board, column and card request bodies; a
+// card's markdown description is the largest thing they carry.
+const maxBoardRequestBody = 256 << 10
 
 // mountCards registers the card routes under /boards/{id}/cards.
 func (h *Handler) mountCards(r chi.Router) {
@@ -31,7 +31,7 @@ type createCardRequest struct {
 
 // decodeBody reads a bounded JSON body into v, writing 400 on failure.
 func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxCardBody)
+	r.Body = http.MaxBytesReader(w, r.Body, maxBoardRequestBody)
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
 		helper.RespondErrorJSON(w, http.StatusBadRequest, "invalid request body")
 		return false

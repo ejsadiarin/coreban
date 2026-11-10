@@ -37,3 +37,37 @@ SELECT id, name, status, position
 FROM columns
 WHERE board_id = $1
 ORDER BY position;
+
+-- name: LockOwnedBoard :one
+-- Confirms the board is the owner's and serialises changes to its set of
+-- columns (the per-status invariant) for the rest of the transaction.
+SELECT id FROM boards WHERE id = $1 AND owner_id = $2 FOR UPDATE;
+
+-- name: GetColumn :one
+SELECT id, name, status, position
+FROM columns
+WHERE id = $1 AND board_id = $2;
+
+-- name: NextColumnPosition :one
+SELECT (COALESCE(max(position), -1) + 1)::integer
+FROM columns
+WHERE board_id = $1;
+
+-- name: UpdateColumn :exec
+UPDATE columns
+SET name = COALESCE(sqlc.narg(name), name),
+    status = COALESCE(sqlc.narg(status), status)
+WHERE id = sqlc.arg(id) AND board_id = sqlc.arg(board_id);
+
+-- name: CountStatusColumns :one
+SELECT count(*) FROM columns WHERE board_id = $1 AND status = $2;
+
+-- name: CountColumnCards :one
+-- Every card counts, archived or not.
+SELECT count(*) FROM cards WHERE column_id = $1;
+
+-- name: DeleteColumn :exec
+DELETE FROM columns WHERE id = $1 AND board_id = $2;
+
+-- name: SetColumnPosition :exec
+UPDATE columns SET position = $3 WHERE id = $1 AND board_id = $2;

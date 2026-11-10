@@ -53,6 +53,44 @@ Content-Type: application/json
 
 DELETE {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE
 
+# ─── Columns ───────────────────────────────────────────────────────────────
+# Every board keeps at least one column per status (todo, in_progress, done),
+# and a column holding any card can't be deleted: both refusals are 409 with
+# the reason in "error".
+
+### Add a column at the end → 201
+
+POST {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/columns
+Content-Type: application/json
+
+{
+  "name": "Review",
+  "status": "in_progress"
+}
+
+### Rename a column and/or change its status (its cards follow)
+
+PATCH {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/columns/PASTE_COLUMN_UUID_HERE
+Content-Type: application/json
+
+{
+  "name": "Shipped",
+  "status": "done"
+}
+
+### Move a column to a slot among the others (0 = leftmost)
+
+POST {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/columns/PASTE_COLUMN_UUID_HERE/move
+Content-Type: application/json
+
+{
+  "index": 0
+}
+
+### Delete an empty column → 204
+
+DELETE {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/columns/PASTE_COLUMN_UUID_HERE
+
 # ─── Cards ─────────────────────────────────────────────────────────────────
 # A card's status is its column's (ADR-0001). GET /boards/{id} lists each
 # column's cards in priority order.

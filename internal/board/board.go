@@ -22,6 +22,19 @@ const (
 	StatusDone       Status = "done"
 )
 
+// statusLabels name each status as the owner reads it.
+var statusLabels = map[Status]string{
+	StatusTodo:       "Todo",
+	StatusInProgress: "In progress",
+	StatusDone:       "Done",
+}
+
+// Valid reports whether s is one of the fixed statuses.
+func (s Status) Valid() bool {
+	_, ok := statusLabels[s]
+	return ok
+}
+
 // Column is an ordered stage on one board.
 type Column struct {
 	ID       uuid.UUID `json:"id"`

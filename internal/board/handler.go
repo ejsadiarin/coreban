@@ -26,6 +26,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Patch("/{id}", h.rename)
 	r.Delete("/{id}", h.remove)
 	r.Route("/{id}/cards", h.mountCards)
+	r.Route("/{id}/columns", h.mountColumns)
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {

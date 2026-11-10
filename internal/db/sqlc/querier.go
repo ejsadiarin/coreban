@@ -18,7 +18,10 @@ type Querier interface {
 	// locked for the claiming transaction; rows another dispatcher holds are
 	// skipped.
 	ClaimOccurrence(ctx context.Context, now pgtype.Timestamptz) (ClaimOccurrenceRow, error)
+	// Every card counts, archived or not.
+	CountColumnCards(ctx context.Context, columnID uuid.UUID) (int64, error)
 	CountOwnerReminders(ctx context.Context, ownerID uuid.UUID) (int64, error)
+	CountStatusColumns(ctx context.Context, arg CountStatusColumnsParams) (int64, error)
 	// Every board statement is scoped by owner_id, so an owner can never read
 	// or change another owner's board. Column statements take a board_id the
 	// caller has already resolved through an owner-scoped board query.
@@ -27,11 +30,13 @@ type Querier interface {
 	CreateColumn(ctx context.Context, arg CreateColumnParams) error
 	CreateReminder(ctx context.Context, arg CreateReminderParams) error
 	DeleteBoard(ctx context.Context, arg DeleteBoardParams) (int64, error)
+	DeleteColumn(ctx context.Context, arg DeleteColumnParams) error
 	DeleteReminder(ctx context.Context, arg DeleteReminderParams) (int64, error)
 	// When the dispatcher next has something to send.
 	EarliestFireAt(ctx context.Context) (pgtype.Timestamptz, error)
 	GetBoard(ctx context.Context, arg GetBoardParams) (GetBoardRow, error)
 	GetCard(ctx context.Context, arg GetCardParams) (GetCardRow, error)
+	GetColumn(ctx context.Context, arg GetColumnParams) (GetColumnRow, error)
 	// Settings are keyed by owner_id: an owner only ever reads or writes their
 	// own row.
 	GetOwnerSettings(ctx context.Context, ownerID uuid.UUID) (GetOwnerSettingsRow, error)
@@ -43,6 +48,9 @@ type Querier interface {
 	ListColumns(ctx context.Context, boardID uuid.UUID) ([]ListColumnsRow, error)
 	// Soonest first; reminders with nothing left to send last.
 	ListOwnerReminders(ctx context.Context, ownerID uuid.UUID) ([]ListOwnerRemindersRow, error)
+	// Confirms the board is the owner's and serialises changes to its set of
+	// columns (the per-status invariant) for the rest of the transaction.
+	LockOwnedBoard(ctx context.Context, arg LockOwnedBoardParams) (uuid.UUID, error)
 	LockOwnedCard(ctx context.Context, arg LockOwnedCardParams) (uuid.UUID, error)
 	// Card statements take a board_id the caller has already resolved through
 	// an owner-scoped query (LockOwnedColumn, GetBoard), or join boards to
@@ -55,6 +63,7 @@ type Querier interface {
 	// Serialises an owner's reminder creates for the transaction, so the cap
 	// check and the insert can't interleave.
 	LockOwnerReminders(ctx context.Context, ownerID uuid.UUID) error
+	NextColumnPosition(ctx context.Context, boardID uuid.UUID) (int32, error)
 	PlaceCard(ctx context.Context, arg PlaceCardParams) error
 	PutOwnerSettings(ctx context.Context, arg PutOwnerSettingsParams) error
 	RecordDelivery(ctx context.Context, arg RecordDeliveryParams) error
@@ -66,7 +75,9 @@ type Querier interface {
 	// Puts back an occurrence a send could not deliver yet, unless the owner
 	// has rescheduled the reminder since it was claimed.
 	RestoreReminder(ctx context.Context, arg RestoreReminderParams) error
+	SetColumnPosition(ctx context.Context, arg SetColumnPositionParams) error
 	UpdateCard(ctx context.Context, arg UpdateCardParams) (int64, error)
+	UpdateColumn(ctx context.Context, arg UpdateColumnParams) error
 	// A new starts_at re-arms the reminder at that moment.
 	UpdateReminder(ctx context.Context, arg UpdateReminderParams) (int64, error)
 }
