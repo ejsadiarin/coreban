@@ -26,6 +26,9 @@ type Card struct {
 	Position    float64            `json:"position"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	DueDate     pgtype.Date        `json:"due_date"`
+	DueAt       pgtype.Timestamptz `json:"due_at"`
+	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
 }
 
 type Column struct {

@@ -10,6 +10,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+
+	"github.com/ejsadiarin/coreban/internal/moment"
 )
 
 // KindOnce is the one-off schedule: fire once, at a moment.
@@ -82,33 +84,19 @@ type scheduleRequest struct {
 	At   string `json:"at"`
 }
 
-var wallLayouts = []string{"2006-01-02T15:04:05", "2006-01-02T15:04"}
-
 // parseSchedule validates a requested schedule for an owner in loc, now.
 func parseSchedule(req scheduleRequest, loc *time.Location, now time.Time) (Schedule, error) {
 	if req.Kind != KindOnce {
 		return Schedule{}, errInvalid(`schedule.kind must be "once"`)
 	}
-	at, err := parseMoment(strings.TrimSpace(req.At), loc)
-	if err != nil {
-		return Schedule{}, err
+	at, ok := moment.Parse(strings.TrimSpace(req.At), loc)
+	if !ok {
+		return Schedule{}, errInvalid("schedule.at must be a date and time such as 2026-11-10T07:00")
 	}
 	if !at.After(now) {
 		return Schedule{}, errInvalid("schedule.at must be in the future")
 	}
 	return Schedule{Kind: KindOnce, At: at}, nil
-}
-
-func parseMoment(s string, loc *time.Location) (time.Time, error) {
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t, nil
-	}
-	for _, layout := range wallLayouts {
-		if t, err := time.ParseInLocation(layout, s, loc); err == nil {
-			return t, nil
-		}
-	}
-	return time.Time{}, errInvalid("schedule.at must be a date and time such as 2026-11-10T07:00")
 }
 
 // ErrNotFound is returned for a reminder the owner doesn't have. It never

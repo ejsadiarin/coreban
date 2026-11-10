@@ -64,8 +64,54 @@ type Card struct {
 	Status      Status    `json:"status"`
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	// Due is when the card is expected to be finished, if ever.
+	Due *Due `json:"due"`
+	// ArchivedAt is set while the card is archived: hidden from its board,
+	// kept, and still counted by its column.
+	ArchivedAt *time.Time `json:"archived_at"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+}
+
+// Due is a calendar date ("2026-11-14") or an instant, exactly one of
+// them, so it reads back as whichever the owner set.
+type Due struct {
+	Date string     `json:"date,omitempty"`
+	At   *time.Time `json:"at,omitempty"`
+}
+
+// dateLayout is how a date-only due is written.
+const dateLayout = "2006-01-02"
+
+// inZone renders the card's due instant in loc, the owner's timezone.
+func (c Card) inZone(loc *time.Location) Card {
+	if c.Due != nil && c.Due.At != nil {
+		at := c.Due.At.In(loc)
+		c.Due = &Due{At: &at}
+	}
+	return c
+}
+
+// inZone renders the board's cards as Card.inZone does.
+func (b Board) inZone(loc *time.Location) Board {
+	cols := make([]Column, len(b.Columns))
+	for i, col := range b.Columns {
+		cols[i] = col.inZone(loc)
+	}
+	b.Columns = cols
+	return b
+}
+
+func (c Column) inZone(loc *time.Location) Column {
+	if c.Cards == nil {
+		return c
+	}
+	cards := make([]Card, len(c.Cards))
+	for i, k := range c.Cards {
+		cards[i] = k.inZone(loc)
+	}
+	c.Cards = cards
+	return c
 }
 
 // defaultColumns are the columns a new board starts with, one per status.

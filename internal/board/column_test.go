@@ -159,7 +159,7 @@ func TestAColumnHoldingCardsCannotBeDeleted(t *testing.T) {
 	k := o.createCard(b, review, "Write the post")
 
 	refusal(t, o.do(http.MethodDelete, columnPath(b, review), nil),
-		http.StatusConflict, "Review still holds cards; move them to another column first")
+		http.StatusConflict, "Review still holds cards, archived ones included; move or delete them first (restore an archived card to move it)")
 
 	o.mustMove(b, k, b.Columns[0], 0)
 	if rec := o.do(http.MethodDelete, columnPath(b, review), nil); rec.Code != http.StatusNoContent {

@@ -1,21 +1,51 @@
 package board
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/ejsadiarin/coreban/internal/helper"
+	"github.com/ejsadiarin/coreban/internal/settings"
 )
 
 // Handler serves the boards API. Reads resolve the owner through a
 // targeted read (act_as); writes always bind to the caller.
 type Handler struct {
 	Store *Store
+	// Settings gives each owner's timezone, which card dues are read and
+	// shown in.
+	Settings *settings.Store
+}
+
+// zone is the owner's timezone.
+func (h *Handler) zone(ctx context.Context, owner uuid.UUID) (*time.Location, error) {
+	s, err := h.Settings.Get(ctx, owner)
+	if err != nil {
+		return nil, err
+	}
+	return time.LoadLocation(s.Timezone)
+}
+
+// zoned is a response holding times to show in the owner's timezone.
+type zoned[T any] interface {
+	inZone(loc *time.Location) T
+}
+
+// respondZoned writes v with its times in the owner's timezone.
+func respondZoned[T zoned[T]](h *Handler, w http.ResponseWriter, r *http.Request, owner uuid.UUID, status int, v T) {
+	loc, err := h.zone(r.Context(), owner)
+	if err != nil {
+		helper.RespondErrorJSON(w, http.StatusInternalServerError, "failed to load your timezone")
+		return
+	}
+	helper.RespondJSON(w, status, v.inZone(loc))
 }
 
 // Mount registers the boards routes on r.
@@ -90,7 +120,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	}
 	b, err := h.Store.Get(r.Context(), owner, id)
 	if !respondStoreError(w, err, "failed to fetch board") {
-		helper.RespondJSON(w, http.StatusOK, b)
+		respondZoned(h, w, r, owner, http.StatusOK, b)
 	}
 }
 

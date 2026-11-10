@@ -180,7 +180,7 @@ func (s *Store) DeleteColumn(ctx context.Context, owner, boardID, id uuid.UUID) 
 		if err != nil {
 			return err
 		}
-		holdsCards := &RefusedError{fmt.Sprintf("%s still holds cards; move them to another column first", col.Name)}
+		holdsCards := &RefusedError{fmt.Sprintf("%s still holds cards, archived ones included; move or delete them first (restore an archived card to move it)", col.Name)}
 		n, err := q.CountColumnCards(ctx, id)
 		if err != nil {
 			return err

@@ -13,6 +13,7 @@ import (
 
 type Querier interface {
 	AdvanceReminder(ctx context.Context, arg AdvanceReminderParams) error
+	ArchiveCard(ctx context.Context, id uuid.UUID) error
 	// The earliest occurrence whose moment has come, of an owner who has a
 	// notification target,
 	// locked for the claiming transaction; rows another dispatcher holds are
@@ -30,6 +31,7 @@ type Querier interface {
 	CreateColumn(ctx context.Context, arg CreateColumnParams) error
 	CreateReminder(ctx context.Context, arg CreateReminderParams) error
 	DeleteBoard(ctx context.Context, arg DeleteBoardParams) (int64, error)
+	DeleteCard(ctx context.Context, arg DeleteCardParams) (int64, error)
 	DeleteColumn(ctx context.Context, arg DeleteColumnParams) error
 	DeleteReminder(ctx context.Context, arg DeleteReminderParams) (int64, error)
 	// When the dispatcher next has something to send.
@@ -41,9 +43,13 @@ type Querier interface {
 	// own row.
 	GetOwnerSettings(ctx context.Context, ownerID uuid.UUID) (GetOwnerSettingsRow, error)
 	GetReminder(ctx context.Context, arg GetReminderParams) (GetReminderRow, error)
+	// Most recently archived first.
+	ListArchivedCards(ctx context.Context, boardID uuid.UUID) ([]ListArchivedCardsRow, error)
+	// The board's cards in priority order; archived cards are left out.
 	ListBoardCards(ctx context.Context, boardID uuid.UUID) ([]ListBoardCardsRow, error)
 	ListBoards(ctx context.Context, ownerID uuid.UUID) ([]ListBoardsRow, error)
-	// The column's cards in order, leaving out the card being placed.
+	// The column's cards in order, leaving out the card being placed and
+	// archived cards (a restored card returns to the bottom).
 	ListColumnPositions(ctx context.Context, arg ListColumnPositionsParams) ([]ListColumnPositionsRow, error)
 	ListColumns(ctx context.Context, boardID uuid.UUID) ([]ListColumnsRow, error)
 	// Soonest first; reminders with nothing left to send last.
@@ -51,7 +57,7 @@ type Querier interface {
 	// Confirms the board is the owner's and serialises changes to its set of
 	// columns (the per-status invariant) for the rest of the transaction.
 	LockOwnedBoard(ctx context.Context, arg LockOwnedBoardParams) (uuid.UUID, error)
-	LockOwnedCard(ctx context.Context, arg LockOwnedCardParams) (uuid.UUID, error)
+	LockOwnedCard(ctx context.Context, arg LockOwnedCardParams) (LockOwnedCardRow, error)
 	// Card statements take a board_id the caller has already resolved through
 	// an owner-scoped query (LockOwnedColumn, GetBoard), or join boards to
 	// check owner_id themselves. A card's status is always read from its column.
@@ -72,10 +78,13 @@ type Querier interface {
 	// in their current order. Only needed when repeated inserts between the
 	// same neighbours exhaust the gap between them.
 	RenumberColumn(ctx context.Context, arg RenumberColumnParams) error
+	// Back to the bottom of its column.
+	RestoreCard(ctx context.Context, id uuid.UUID) error
 	// Puts back an occurrence a send could not deliver yet, unless the owner
 	// has rescheduled the reminder since it was claimed.
 	RestoreReminder(ctx context.Context, arg RestoreReminderParams) error
 	SetColumnPosition(ctx context.Context, arg SetColumnPositionParams) error
+	// set_due replaces the due (both fields; NULLs clear it), else it's kept.
 	UpdateCard(ctx context.Context, arg UpdateCardParams) (int64, error)
 	UpdateColumn(ctx context.Context, arg UpdateColumnParams) error
 	// A new starts_at re-arms the reminder at that moment.

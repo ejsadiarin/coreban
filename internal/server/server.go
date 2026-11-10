@@ -33,7 +33,7 @@ func New(pool *pgxpool.Pool, authenticate func(http.Handler) http.Handler) *Serv
 	return &Server{
 		Pool:         pool,
 		authenticate: authenticate,
-		Boards:       &board.Handler{Store: &board.Store{Pool: pool}},
+		Boards:       &board.Handler{Store: &board.Store{Pool: pool}, Settings: settingsStore},
 		Settings:     &settings.Handler{Store: settingsStore},
 		Reminders: &reminder.Handler{
 			Store:    &reminder.Store{Pool: pool},

@@ -130,6 +130,33 @@ Content-Type: application/json
   "index": 0
 }
 
+### Set a card's due: a date, or a date and time (no offset: your timezone)
+
+PATCH {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/cards/PASTE_CARD_UUID_HERE
+Content-Type: application/json
+
+{
+  "due": { "date": "2026-11-14" }
+}
+
+### Clear the due, or archive (true) / restore (false) the card
+
+PATCH {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/cards/PASTE_CARD_UUID_HERE
+Content-Type: application/json
+
+{
+  "due": null,
+  "archived": true
+}
+
+### List a board's archived cards, most recently archived first
+
+GET {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/cards?archived=true
+
+### Delete a card for good (archived or not) → 204
+
+DELETE {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/cards/PASTE_CARD_UUID_HERE
+
 # ─── Settings ──────────────────────────────────────────────────────────────
 # The owner's notification target (an ntfy topic name under coreban-, never
 # a URL) and IANA timezone. Defaults: no topic, UTC.

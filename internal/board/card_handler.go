@@ -5,11 +5,13 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/ejsadiarin/coreban/internal/helper"
+	"github.com/ejsadiarin/coreban/internal/moment"
 )
 
 // maxBoardRequestBody bounds board, column and card request bodies; a
@@ -18,9 +20,11 @@ const maxBoardRequestBody = 256 << 10
 
 // mountCards registers the card routes under /boards/{id}/cards.
 func (h *Handler) mountCards(r chi.Router) {
+	r.Get("/", h.listCards)
 	r.Post("/", h.createCard)
 	r.Get("/{cardID}", h.getCard)
 	r.Patch("/{cardID}", h.editCard)
+	r.Delete("/{cardID}", h.deleteCard)
 	r.Post("/{cardID}/move", h.moveCard)
 }
 
@@ -59,7 +63,7 @@ func (h *Handler) createCard(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := h.Store.CreateCard(r.Context(), owner, boardID, req.ColumnID, title)
 	if !respondCardError(w, err, "failed to create card") {
-		helper.RespondJSON(w, http.StatusCreated, c)
+		respondZoned(h, w, r, owner, http.StatusCreated, c)
 	}
 }
 
@@ -74,14 +78,89 @@ func (h *Handler) getCard(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := h.Store.GetCard(r.Context(), owner, boardID, cardID)
 	if !respondCardError(w, err, "failed to fetch card") {
-		helper.RespondJSON(w, http.StatusOK, c)
+		respondZoned(h, w, r, owner, http.StatusOK, c)
+	}
+}
+
+// cardList is a list response of cards.
+type cardList []Card
+
+func (l cardList) inZone(loc *time.Location) cardList {
+	out := make(cardList, len(l))
+	for i, c := range l {
+		out[i] = c.inZone(loc)
+	}
+	return out
+}
+
+// listCards lists the board's cards in priority order, or with
+// ?archived=true its archived cards, most recently archived first.
+func (h *Handler) listCards(w http.ResponseWriter, r *http.Request) {
+	owner, ok := helper.ResolveTargetUser(w, r)
+	if !ok {
+		return
+	}
+	boardID, ok := boardID(w, r)
+	if !ok {
+		return
+	}
+	cards, err := h.Store.ListCards(r.Context(), owner, boardID, r.URL.Query().Get("archived") == "true")
+	if !respondCardError(w, err, "failed to list cards") {
+		respondZoned(h, w, r, owner, http.StatusOK, cardList(cards))
+	}
+}
+
+func (h *Handler) deleteCard(w http.ResponseWriter, r *http.Request) {
+	owner, ok := helper.GetUserID(w, r)
+	if !ok {
+		return
+	}
+	boardID, cardID, ok := cardIDs(w, r)
+	if !ok {
+		return
+	}
+	if !respondCardError(w, h.Store.DeleteCard(r.Context(), owner, boardID, cardID), "failed to delete card") {
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
 // editCardRequest is a partial edit: absent fields are left unchanged.
+// Due is null to clear it, else {"date": "2026-11-14"} or {"at": …} (an
+// RFC 3339 instant, or a wall-clock time read in the owner's timezone).
 type editCardRequest struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
+	Title       *string         `json:"title"`
+	Description *string         `json:"description"`
+	Due         json.RawMessage `json:"due"`
+	Archived    *bool           `json:"archived"`
+}
+
+type dueRequest struct {
+	Date *string `json:"date"`
+	At   *string `json:"at"`
+}
+
+// parseDue reads a requested due for an owner in loc; nil clears it. Its
+// error text is the 400 detail.
+func parseDue(raw json.RawMessage, loc *time.Location) (*Due, error) {
+	if string(raw) == "null" {
+		return nil, nil
+	}
+	var req dueRequest
+	if err := json.Unmarshal(raw, &req); err != nil || (req.Date == nil) == (req.At == nil) {
+		return nil, errors.New("due must have a date or an at, not both")
+	}
+	if req.Date != nil {
+		d := strings.TrimSpace(*req.Date)
+		if _, err := time.Parse(dateLayout, d); err != nil {
+			return nil, errors.New("due.date must be a date such as 2026-11-14")
+		}
+		return &Due{Date: d}, nil
+	}
+	at, ok := moment.Parse(strings.TrimSpace(*req.At), loc)
+	if !ok {
+		return nil, errors.New("due.at must be a date and time such as 2026-11-14T17:00")
+	}
+	return &Due{At: &at}, nil
 }
 
 func (h *Handler) editCard(w http.ResponseWriter, r *http.Request) {
@@ -105,9 +184,23 @@ func (h *Handler) editCard(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Title = &title
 	}
-	c, err := h.Store.EditCard(r.Context(), owner, boardID, cardID, CardEdit{Title: req.Title, Description: req.Description})
+	e := CardEdit{Title: req.Title, Description: req.Description, Archived: req.Archived}
+	if len(req.Due) > 0 {
+		loc, err := h.zone(r.Context(), owner)
+		if err != nil {
+			helper.RespondErrorJSON(w, http.StatusInternalServerError, "failed to load your timezone")
+			return
+		}
+		due, err := parseDue(req.Due, loc)
+		if err != nil {
+			helper.RespondErrorJSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		e.SetDue, e.Due = true, due
+	}
+	c, err := h.Store.EditCard(r.Context(), owner, boardID, cardID, e)
 	if !respondCardError(w, err, "failed to edit card") {
-		helper.RespondJSON(w, http.StatusOK, c)
+		respondZoned(h, w, r, owner, http.StatusOK, c)
 	}
 }
 
@@ -133,7 +226,7 @@ func (h *Handler) moveCard(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := h.Store.MoveCard(r.Context(), owner, boardID, cardID, req.ColumnID, req.Index)
 	if !respondCardError(w, err, "failed to move card") {
-		helper.RespondJSON(w, http.StatusOK, c)
+		respondZoned(h, w, r, owner, http.StatusOK, c)
 	}
 }
 
@@ -158,6 +251,8 @@ func respondCardError(w http.ResponseWriter, err error, msg string) bool {
 	switch {
 	case errors.Is(err, ErrCardNotFound):
 		helper.RespondErrorJSON(w, http.StatusNotFound, "card not found")
+	case errors.Is(err, ErrCardArchived):
+		helper.RespondErrorJSON(w, http.StatusConflict, "the card is archived; restore it first")
 	case errors.Is(err, ErrColumnNotFound):
 		helper.RespondErrorJSON(w, http.StatusBadRequest, "column_id is not a column on this board")
 	default:

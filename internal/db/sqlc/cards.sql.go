@@ -12,6 +12,15 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const archiveCard = `-- name: ArchiveCard :exec
+UPDATE cards SET archived_at = COALESCE(archived_at, now()), updated_at = now() WHERE id = $1
+`
+
+func (q *Queries) ArchiveCard(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, archiveCard, id)
+	return err
+}
+
 const createCard = `-- name: CreateCard :exec
 INSERT INTO cards (id, board_id, column_id, title, position)
 VALUES ($1, $2, $3, $4,
@@ -35,8 +44,28 @@ func (q *Queries) CreateCard(ctx context.Context, arg CreateCardParams) error {
 	return err
 }
 
+const deleteCard = `-- name: DeleteCard :execrows
+DELETE FROM cards k
+USING boards b
+WHERE k.id = $1 AND k.board_id = $2 AND b.id = k.board_id AND b.owner_id = $3
+`
+
+type DeleteCardParams struct {
+	ID      uuid.UUID `json:"id"`
+	BoardID uuid.UUID `json:"board_id"`
+	OwnerID uuid.UUID `json:"owner_id"`
+}
+
+func (q *Queries) DeleteCard(ctx context.Context, arg DeleteCardParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteCard, arg.ID, arg.BoardID, arg.OwnerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getCard = `-- name: GetCard :one
-SELECT k.id, k.board_id, k.column_id, c.status, k.title, k.description, k.created_at, k.updated_at
+SELECT k.id, k.board_id, k.column_id, c.status, k.title, k.description, k.due_date, k.due_at, k.archived_at, k.created_at, k.updated_at
 FROM cards k
 JOIN columns c ON c.id = k.column_id
 JOIN boards b ON b.id = k.board_id
@@ -56,6 +85,9 @@ type GetCardRow struct {
 	Status      string             `json:"status"`
 	Title       string             `json:"title"`
 	Description string             `json:"description"`
+	DueDate     pgtype.Date        `json:"due_date"`
+	DueAt       pgtype.Timestamptz `json:"due_at"`
+	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
@@ -70,17 +102,75 @@ func (q *Queries) GetCard(ctx context.Context, arg GetCardParams) (GetCardRow, e
 		&i.Status,
 		&i.Title,
 		&i.Description,
+		&i.DueDate,
+		&i.DueAt,
+		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
 }
 
-const listBoardCards = `-- name: ListBoardCards :many
-SELECT k.id, k.board_id, k.column_id, c.status, k.title, k.description, k.created_at, k.updated_at
+const listArchivedCards = `-- name: ListArchivedCards :many
+SELECT k.id, k.board_id, k.column_id, c.status, k.title, k.description, k.due_date, k.due_at, k.archived_at, k.created_at, k.updated_at
 FROM cards k
 JOIN columns c ON c.id = k.column_id
-WHERE k.board_id = $1
+WHERE k.board_id = $1 AND k.archived_at IS NOT NULL
+ORDER BY k.archived_at DESC, k.id
+`
+
+type ListArchivedCardsRow struct {
+	ID          uuid.UUID          `json:"id"`
+	BoardID     uuid.UUID          `json:"board_id"`
+	ColumnID    uuid.UUID          `json:"column_id"`
+	Status      string             `json:"status"`
+	Title       string             `json:"title"`
+	Description string             `json:"description"`
+	DueDate     pgtype.Date        `json:"due_date"`
+	DueAt       pgtype.Timestamptz `json:"due_at"`
+	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Most recently archived first.
+func (q *Queries) ListArchivedCards(ctx context.Context, boardID uuid.UUID) ([]ListArchivedCardsRow, error) {
+	rows, err := q.db.Query(ctx, listArchivedCards, boardID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListArchivedCardsRow{}
+	for rows.Next() {
+		var i ListArchivedCardsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BoardID,
+			&i.ColumnID,
+			&i.Status,
+			&i.Title,
+			&i.Description,
+			&i.DueDate,
+			&i.DueAt,
+			&i.ArchivedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listBoardCards = `-- name: ListBoardCards :many
+SELECT k.id, k.board_id, k.column_id, c.status, k.title, k.description, k.due_date, k.due_at, k.archived_at, k.created_at, k.updated_at
+FROM cards k
+JOIN columns c ON c.id = k.column_id
+WHERE k.board_id = $1 AND k.archived_at IS NULL
 ORDER BY k.position, k.id
 `
 
@@ -91,10 +181,14 @@ type ListBoardCardsRow struct {
 	Status      string             `json:"status"`
 	Title       string             `json:"title"`
 	Description string             `json:"description"`
+	DueDate     pgtype.Date        `json:"due_date"`
+	DueAt       pgtype.Timestamptz `json:"due_at"`
+	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+// The board's cards in priority order; archived cards are left out.
 func (q *Queries) ListBoardCards(ctx context.Context, boardID uuid.UUID) ([]ListBoardCardsRow, error) {
 	rows, err := q.db.Query(ctx, listBoardCards, boardID)
 	if err != nil {
@@ -111,6 +205,9 @@ func (q *Queries) ListBoardCards(ctx context.Context, boardID uuid.UUID) ([]List
 			&i.Status,
 			&i.Title,
 			&i.Description,
+			&i.DueDate,
+			&i.DueAt,
+			&i.ArchivedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -127,7 +224,7 @@ func (q *Queries) ListBoardCards(ctx context.Context, boardID uuid.UUID) ([]List
 const listColumnPositions = `-- name: ListColumnPositions :many
 SELECT id, position
 FROM cards
-WHERE column_id = $1 AND id <> $2
+WHERE column_id = $1 AND id <> $2 AND archived_at IS NULL
 ORDER BY position, id
 `
 
@@ -141,7 +238,8 @@ type ListColumnPositionsRow struct {
 	Position float64   `json:"position"`
 }
 
-// The column's cards in order, leaving out the card being placed.
+// The column's cards in order, leaving out the card being placed and
+// archived cards (a restored card returns to the bottom).
 func (q *Queries) ListColumnPositions(ctx context.Context, arg ListColumnPositionsParams) ([]ListColumnPositionsRow, error) {
 	rows, err := q.db.Query(ctx, listColumnPositions, arg.ColumnID, arg.ID)
 	if err != nil {
@@ -163,7 +261,7 @@ func (q *Queries) ListColumnPositions(ctx context.Context, arg ListColumnPositio
 }
 
 const lockOwnedCard = `-- name: LockOwnedCard :one
-SELECT k.id
+SELECT k.id, k.archived_at
 FROM cards k
 JOIN boards b ON b.id = k.board_id
 WHERE k.id = $1 AND k.board_id = $2 AND b.owner_id = $3
@@ -176,11 +274,16 @@ type LockOwnedCardParams struct {
 	OwnerID uuid.UUID `json:"owner_id"`
 }
 
-func (q *Queries) LockOwnedCard(ctx context.Context, arg LockOwnedCardParams) (uuid.UUID, error) {
+type LockOwnedCardRow struct {
+	ID         uuid.UUID          `json:"id"`
+	ArchivedAt pgtype.Timestamptz `json:"archived_at"`
+}
+
+func (q *Queries) LockOwnedCard(ctx context.Context, arg LockOwnedCardParams) (LockOwnedCardRow, error) {
 	row := q.db.QueryRow(ctx, lockOwnedCard, arg.ID, arg.BoardID, arg.OwnerID)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
+	var i LockOwnedCardRow
+	err := row.Scan(&i.ID, &i.ArchivedAt)
+	return i, err
 }
 
 const lockOwnedColumn = `-- name: LockOwnedColumn :one
@@ -233,7 +336,7 @@ SET position = r.ord
 FROM (
     SELECT o.id, row_number() OVER (ORDER BY o.position, o.id) AS ord
     FROM cards o
-    WHERE o.column_id = $1 AND o.id <> $2
+    WHERE o.column_id = $1 AND o.id <> $2 AND o.archived_at IS NULL
 ) r
 WHERE k.id = r.id
 `
@@ -251,28 +354,51 @@ func (q *Queries) RenumberColumn(ctx context.Context, arg RenumberColumnParams) 
 	return err
 }
 
+const restoreCard = `-- name: RestoreCard :exec
+UPDATE cards k
+SET archived_at = NULL,
+    position = COALESCE((SELECT max(o.position) FROM cards o WHERE o.column_id = k.column_id AND o.archived_at IS NULL), 0) + 1,
+    updated_at = now()
+WHERE k.id = $1 AND k.archived_at IS NOT NULL
+`
+
+// Back to the bottom of its column.
+func (q *Queries) RestoreCard(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, restoreCard, id)
+	return err
+}
+
 const updateCard = `-- name: UpdateCard :execrows
 UPDATE cards k
 SET title = COALESCE($1, k.title),
     description = COALESCE($2, k.description),
+    due_date = CASE WHEN $3::boolean THEN $4::date ELSE k.due_date END,
+    due_at = CASE WHEN $3::boolean THEN $5::timestamptz ELSE k.due_at END,
     updated_at = now()
 FROM boards b
-WHERE k.id = $3 AND k.board_id = $4
-  AND b.id = k.board_id AND b.owner_id = $5
+WHERE k.id = $6 AND k.board_id = $7
+  AND b.id = k.board_id AND b.owner_id = $8
 `
 
 type UpdateCardParams struct {
-	Title       pgtype.Text `json:"title"`
-	Description pgtype.Text `json:"description"`
-	ID          uuid.UUID   `json:"id"`
-	BoardID     uuid.UUID   `json:"board_id"`
-	OwnerID     uuid.UUID   `json:"owner_id"`
+	Title       pgtype.Text        `json:"title"`
+	Description pgtype.Text        `json:"description"`
+	SetDue      bool               `json:"set_due"`
+	DueDate     pgtype.Date        `json:"due_date"`
+	DueAt       pgtype.Timestamptz `json:"due_at"`
+	ID          uuid.UUID          `json:"id"`
+	BoardID     uuid.UUID          `json:"board_id"`
+	OwnerID     uuid.UUID          `json:"owner_id"`
 }
 
+// set_due replaces the due (both fields; NULLs clear it), else it's kept.
 func (q *Queries) UpdateCard(ctx context.Context, arg UpdateCardParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateCard,
 		arg.Title,
 		arg.Description,
+		arg.SetDue,
+		arg.DueDate,
+		arg.DueAt,
 		arg.ID,
 		arg.BoardID,
 		arg.OwnerID,

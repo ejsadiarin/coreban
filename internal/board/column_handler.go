@@ -87,7 +87,7 @@ func (h *Handler) editColumn(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := h.Store.EditColumn(r.Context(), owner, boardID, columnID, ColumnEdit{Name: req.Name, Status: req.Status})
 	if !respondColumnError(w, err, "failed to edit column") {
-		helper.RespondJSON(w, http.StatusOK, c)
+		respondZoned(h, w, r, owner, http.StatusOK, c)
 	}
 }
 
@@ -112,7 +112,7 @@ func (h *Handler) moveColumn(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := h.Store.MoveColumn(r.Context(), owner, boardID, columnID, req.Index)
 	if !respondColumnError(w, err, "failed to move column") {
-		helper.RespondJSON(w, http.StatusOK, c)
+		respondZoned(h, w, r, owner, http.StatusOK, c)
 	}
 }
 
