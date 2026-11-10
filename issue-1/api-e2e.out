@@ -1,0 +1,33 @@
+admin=fddeb431-7e18-4797-85e7-4ccef256fe13 demo=a6780577-a8ab-442e-b7de-d0f8f2166b31
+== 53: API keys scoped coreban:read / coreban:write
+PASS  read key GET boards (200)
+      boards seen: ["Homelab","Job hunt 2026"]
+PASS  read key POST board refused (403)
+PASS  write key POST board (201)
+FAIL  write key POST card (want 201, got 400) {"error":"column_id is not a column on this board"}
+PASS  corefinance key on coreban refused (403)
+PASS  bogus key (401)
+== 54: targeted reads (act_as) for admin, writes bound to caller
+PASS  demo creates own board (201)
+PASS  admin targeted read of demo boards (200)
+      admin sees as demo: ["Demo private board"]
+PASS  admin targeted read of demo reminders (200)
+PASS  admin write with user_id (201)
+      demo now has: ["Demo private board"]
+      admin now has: ["Homelab","Job hunt 2026","Scripted board","Admin write w/ user_id"]
+PASS  write bound to caller, not target
+PASS  non-admin targeting admin refused (403)
+== 55: coreban accepts only the gateway internal token, audience coreban
+PASS  direct, no token (401)
+PASS  direct, forged X-User-ID (401)
+PASS  direct, raw API key (401)
+PASS  direct, valid gateway token aud=coreban (control) (200)
+PASS  direct, gateway key but aud=coredraw (401)
+PASS  direct, rogue key same kid (401)
+PASS  direct, expired token (401)
+PASS  unauthenticated /health liveness (200)
+== 56: refuses to start without the gateway's JWKS
+      exit=1; last log: exit status 1
+PASS  refused to start
+{"id":"600b340b-e878-4010-98d0-15047d352a54","board_id":"218e4870-e2d5-4724-96cb-9c69d9816852","column_id":"cc79214f-cf13-4a84-8aa0-cd1e8bbf1bd4","status":"todo","title":"made by a script","description":"","labels":[],"due":null,"archived_at":null,"created_at":"2026-11-10T11:57:45.953589+08:00","updated_at":"2026-11-10T11:57:45.953589+08:00"}
+ 201
