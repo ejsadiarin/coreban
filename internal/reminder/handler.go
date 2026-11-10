@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -110,7 +111,16 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	if h.respondError(w, err, "failed to list reminders") {
 		return
 	}
-	out, err := h.Store.List(r.Context(), owner, v)
+	var cardID *uuid.UUID
+	if raw := r.URL.Query().Get("card_id"); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			helper.RespondErrorJSON(w, http.StatusBadRequest, "card_id must be a card's id")
+			return
+		}
+		cardID = &id
+	}
+	out, err := h.Store.List(r.Context(), owner, cardID, v)
 	if !h.respondError(w, err, "failed to list reminders") {
 		helper.RespondJSON(w, http.StatusOK, out)
 	}
@@ -140,9 +150,34 @@ func (h *Handler) respondReminder(w http.ResponseWriter, r *http.Request, owner,
 	}
 }
 
+// createRequest is a new reminder. With a card_id, the message defaults to
+// the card's title and the schedule may be {"kind": "due"}: once, at the
+// card's due.
 type createRequest struct {
 	Message  string          `json:"message"`
 	Schedule scheduleRequest `json:"schedule"`
+	CardID   *string         `json:"card_id"`
+}
+
+// cardOf resolves a requested card_id to one of the owner's cards.
+func (h *Handler) cardOf(ctx context.Context, owner uuid.UUID, raw string) (*card, error) {
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return nil, errNotYourCard
+	}
+	c, err := h.Store.ownedCard(ctx, owner, id)
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// scheduleFor reads a requested schedule; "due" needs the card it's on.
+func scheduleFor(req scheduleRequest, c *card, v view) (Schedule, error) {
+	if req.Kind == KindDue {
+		return atDue(c, v.loc, v.now)
+	}
+	return parseSchedule(req, v.loc, v.now)
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
@@ -158,15 +193,27 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	if h.respondError(w, err, "failed to create reminder") {
 		return
 	}
-	msg, err := normalizeMessage(req.Message)
+	var c *card
+	var cardID *uuid.UUID
+	if req.CardID != nil {
+		if c, err = h.cardOf(r.Context(), owner, *req.CardID); h.respondError(w, err, "failed to create reminder") {
+			return
+		}
+		cardID = &c.ref.ID
+	}
+	sched, err := scheduleFor(req.Schedule, c, v)
 	if h.respondError(w, err, "") {
 		return
 	}
-	sched, err := parseSchedule(req.Schedule, v.loc, v.now)
+	message := req.Message
+	if strings.TrimSpace(message) == "" && c != nil {
+		message = c.ref.Title
+	}
+	msg, err := normalizeMessage(message)
 	if h.respondError(w, err, "") {
 		return
 	}
-	id, err := h.Store.Create(r.Context(), owner, msg, sched, v, h.Cap)
+	id, err := h.Store.Create(r.Context(), owner, msg, sched, cardID, v, h.Cap)
 	if h.respondError(w, err, "failed to create reminder") {
 		return
 	}
@@ -175,9 +222,11 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 // editRequest is a partial edit: absent fields are left unchanged.
+// card_id: null detaches the reminder from its card.
 type editRequest struct {
 	Message  *string          `json:"message"`
 	Schedule *scheduleRequest `json:"schedule"`
+	CardID   json.RawMessage  `json:"card_id"`
 }
 
 func (h *Handler) edit(w http.ResponseWriter, r *http.Request) {
@@ -198,6 +247,33 @@ func (h *Handler) edit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var e Edit
+	var c *card
+	if len(req.CardID) > 0 {
+		e.SetCard = true
+		if string(req.CardID) != "null" {
+			var raw string
+			if err := json.Unmarshal(req.CardID, &raw); err != nil {
+				helper.RespondErrorJSON(w, http.StatusBadRequest, "card_id must be a card's id, or null")
+				return
+			}
+			if c, err = h.cardOf(r.Context(), owner, raw); h.respondError(w, err, "failed to edit reminder") {
+				return
+			}
+			e.Card = &c.ref.ID
+		}
+	}
+	if req.Schedule != nil && req.Schedule.Kind == KindDue && !e.SetCard {
+		// At the due of the card it's already on.
+		current, err := h.Store.Get(r.Context(), owner, id, v)
+		if h.respondError(w, err, "failed to edit reminder") {
+			return
+		}
+		if current.Card != nil {
+			if c, err = h.cardOf(r.Context(), owner, current.Card.ID.String()); h.respondError(w, err, "failed to edit reminder") {
+				return
+			}
+		}
+	}
 	if req.Message != nil {
 		msg, err := normalizeMessage(*req.Message)
 		if h.respondError(w, err, "") {
@@ -206,7 +282,7 @@ func (h *Handler) edit(w http.ResponseWriter, r *http.Request) {
 		e.Message = &msg
 	}
 	if req.Schedule != nil {
-		sched, err := parseSchedule(*req.Schedule, v.loc, v.now)
+		sched, err := scheduleFor(*req.Schedule, c, v)
 		if h.respondError(w, err, "") {
 			return
 		}

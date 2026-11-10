@@ -12,9 +12,15 @@ import (
 	"github.com/google/uuid"
 )
 
-// PausedNoTarget says a reminder will not be sent until its owner sets a
-// notification target.
-const PausedNoTarget = "no_notification_target"
+// Why a reminder's next occurrence won't be sent when it comes.
+const (
+	// PausedNoTarget: the owner has no notification target yet.
+	PausedNoTarget = "no_notification_target"
+	// PausedCardArchived: its card is archived.
+	PausedCardArchived = "card_archived"
+	// PausedCardCompleted: its card is completed (status Done).
+	PausedCardCompleted = "card_completed"
+)
 
 // DefaultCap is how many reminders one owner may have unless configured
 // otherwise (REMINDER_CAP).
@@ -43,8 +49,17 @@ type Reminder struct {
 	// Paused says why NextFireAt will not be sent when it comes, if so.
 	Paused       *string   `json:"paused"`
 	LastDelivery *Delivery `json:"last_delivery"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	// Card is the card the reminder is about, if any.
+	Card      *CardRef  `json:"card"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// CardRef names the card a reminder is attached to.
+type CardRef struct {
+	ID      uuid.UUID `json:"id"`
+	BoardID uuid.UUID `json:"board_id"`
+	Title   string    `json:"title"`
 }
 
 // errInvalid marks a request the owner must correct; its text is the 400

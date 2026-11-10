@@ -250,7 +250,22 @@ Content-Type: application/json
   "schedule": { "kind": "every", "days": 3, "from": "2026-11-10", "time": "08:00" }
 }
 
-### Edit the message and/or reschedule (a new schedule re-arms it)
+### Remind me at a card's due (09:00 on a date-only due) → 201
+
+POST {{host}}/api/coreban/reminders
+Content-Type: application/json
+
+{
+  "card_id": "PASTE_CARD_UUID_HERE",
+  "schedule": { "kind": "due" }
+}
+
+### A card's reminders
+
+GET {{host}}/api/coreban/reminders?card_id=PASTE_CARD_UUID_HERE
+
+### Edit the message and/or reschedule (a new schedule re-arms it);
+### "card_id": null detaches it from its card
 
 PATCH {{host}}/api/coreban/reminders/PASTE_REMINDER_UUID_HERE
 Content-Type: application/json

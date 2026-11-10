@@ -20,6 +20,8 @@ type Querier interface {
 	// moment has come, or (recurring) whose next occurrence was worked out in a
 	// timezone the owner has since left. Locked for the claiming transaction;
 	// rows another dispatcher holds are skipped.
+	// paused: its card is completed (Done) or archived, so this occurrence is
+	// skipped, not sent.
 	ClaimOccurrence(ctx context.Context, now pgtype.Timestamptz) (ClaimOccurrenceRow, error)
 	// Every card counts, archived or not.
 	CountColumnCards(ctx context.Context, columnID uuid.UUID) (int64, error)
@@ -43,6 +45,8 @@ type Querier interface {
 	GetBoard(ctx context.Context, arg GetBoardParams) (GetBoardRow, error)
 	GetCard(ctx context.Context, arg GetCardParams) (GetCardRow, error)
 	GetColumn(ctx context.Context, arg GetColumnParams) (GetColumnRow, error)
+	// A card on one of the owner's boards, with its due.
+	GetOwnedCard(ctx context.Context, arg GetOwnedCardParams) (GetOwnedCardRow, error)
 	// Settings are keyed by owner_id: an owner only ever reads or writes their
 	// own row.
 	GetOwnerSettings(ctx context.Context, ownerID uuid.UUID) (GetOwnerSettingsRow, error)
@@ -62,7 +66,7 @@ type Querier interface {
 	// Label statements take a board_id the caller has already resolved through
 	// an owner-scoped query (GetBoard), and are scoped by it.
 	ListLabels(ctx context.Context, boardID uuid.UUID) ([]ListLabelsRow, error)
-	ListOwnerReminders(ctx context.Context, ownerID uuid.UUID) ([]ListOwnerRemindersRow, error)
+	ListOwnerReminders(ctx context.Context, arg ListOwnerRemindersParams) ([]ListOwnerRemindersRow, error)
 	// Confirms the board is the owner's and serialises changes to its set of
 	// columns (the per-status invariant) for the rest of the transaction.
 	LockOwnedBoard(ctx context.Context, arg LockOwnedBoardParams) (uuid.UUID, error)

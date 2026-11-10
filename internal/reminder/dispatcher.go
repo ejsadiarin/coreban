@@ -165,8 +165,10 @@ func (d *Dispatcher) claim(ctx context.Context, now time.Time) (claimed, bool, e
 		c = claimed{id: row.ID, message: row.Message, topic: row.NtfyTopic.String, at: row.NextFireAt.Time.In(loc)}
 		found = true
 		advance := dbgen.AdvanceReminderParams{ID: row.ID}
+		// An occurrence of a reminder paused by its card (completed or
+		// archived) is skipped like a missed one: advanced past, not sent.
 		if !row.Rrule.Valid {
-			c.once, c.send = true, true
+			c.once, c.send = true, !row.Paused
 		} else {
 			r, err := parseRule(row.Rrule.String, row.LocalStart.Time)
 			if err != nil {
@@ -184,8 +186,9 @@ func (d *Dispatcher) claim(ctx context.Context, now time.Time) (claimed, bool, e
 			}
 			c.at = r.next(from, loc)
 			next := c.at
-			if c.send = !c.at.After(now); c.send {
+			if due := !c.at.After(now); due {
 				next = r.next(c.at.Add(time.Second), loc)
+				c.send = !row.Paused
 			}
 			advance.NextFireAt = timestamptz(next)
 			advance.NextTz = pgtype.Text{String: row.Timezone, Valid: true}

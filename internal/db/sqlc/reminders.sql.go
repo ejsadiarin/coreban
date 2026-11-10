@@ -30,9 +30,12 @@ func (q *Queries) AdvanceReminder(ctx context.Context, arg AdvanceReminderParams
 }
 
 const claimOccurrence = `-- name: ClaimOccurrence :one
-SELECT r.id, r.message, r.rrule, r.local_start, r.next_fire_at, r.next_tz, r.last_delivery_at, s.ntfy_topic, s.timezone
+SELECT r.id, r.message, r.rrule, r.local_start, r.next_fire_at, r.next_tz, r.last_delivery_at, s.ntfy_topic, s.timezone,
+       COALESCE(c.status = 'done' OR k.archived_at IS NOT NULL, false)::boolean AS paused
 FROM reminders r
 JOIN owner_settings s ON s.owner_id = r.owner_id
+LEFT JOIN cards k ON k.id = r.card_id
+LEFT JOIN columns c ON c.id = k.column_id
 WHERE s.ntfy_topic IS NOT NULL
   AND (r.next_fire_at <= $1 OR r.next_tz <> s.timezone)
 ORDER BY r.next_fire_at, r.id
@@ -50,12 +53,15 @@ type ClaimOccurrenceRow struct {
 	LastDeliveryAt pgtype.Timestamptz `json:"last_delivery_at"`
 	NtfyTopic      pgtype.Text        `json:"ntfy_topic"`
 	Timezone       string             `json:"timezone"`
+	Paused         bool               `json:"paused"`
 }
 
 // The earliest reminder of an owner with a notification target whose
 // moment has come, or (recurring) whose next occurrence was worked out in a
 // timezone the owner has since left. Locked for the claiming transaction;
 // rows another dispatcher holds are skipped.
+// paused: its card is completed (Done) or archived, so this occurrence is
+// skipped, not sent.
 func (q *Queries) ClaimOccurrence(ctx context.Context, now pgtype.Timestamptz) (ClaimOccurrenceRow, error) {
 	row := q.db.QueryRow(ctx, claimOccurrence, now)
 	var i ClaimOccurrenceRow
@@ -69,6 +75,7 @@ func (q *Queries) ClaimOccurrence(ctx context.Context, now pgtype.Timestamptz) (
 		&i.LastDeliveryAt,
 		&i.NtfyTopic,
 		&i.Timezone,
+		&i.Paused,
 	)
 	return i, err
 }
@@ -85,8 +92,8 @@ func (q *Queries) CountOwnerReminders(ctx context.Context, ownerID uuid.UUID) (i
 }
 
 const createReminder = `-- name: CreateReminder :exec
-INSERT INTO reminders (id, owner_id, message, starts_at, rrule, local_start, next_fire_at, next_tz)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO reminders (id, owner_id, message, starts_at, rrule, local_start, next_fire_at, next_tz, card_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 `
 
 type CreateReminderParams struct {
@@ -98,6 +105,7 @@ type CreateReminderParams struct {
 	LocalStart pgtype.Timestamp   `json:"local_start"`
 	NextFireAt pgtype.Timestamptz `json:"next_fire_at"`
 	NextTz     pgtype.Text        `json:"next_tz"`
+	CardID     pgtype.UUID        `json:"card_id"`
 }
 
 func (q *Queries) CreateReminder(ctx context.Context, arg CreateReminderParams) error {
@@ -110,6 +118,7 @@ func (q *Queries) CreateReminder(ctx context.Context, arg CreateReminderParams) 
 		arg.LocalStart,
 		arg.NextFireAt,
 		arg.NextTz,
+		arg.CardID,
 	)
 	return err
 }
@@ -146,12 +155,51 @@ func (q *Queries) EarliestFireAt(ctx context.Context) (pgtype.Timestamptz, error
 	return column_1, err
 }
 
+const getOwnedCard = `-- name: GetOwnedCard :one
+SELECT k.id, k.board_id, k.title, k.due_date, k.due_at
+FROM cards k
+JOIN boards b ON b.id = k.board_id
+WHERE k.id = $1 AND b.owner_id = $2
+`
+
+type GetOwnedCardParams struct {
+	ID      uuid.UUID `json:"id"`
+	OwnerID uuid.UUID `json:"owner_id"`
+}
+
+type GetOwnedCardRow struct {
+	ID      uuid.UUID          `json:"id"`
+	BoardID uuid.UUID          `json:"board_id"`
+	Title   string             `json:"title"`
+	DueDate pgtype.Date        `json:"due_date"`
+	DueAt   pgtype.Timestamptz `json:"due_at"`
+}
+
+// A card on one of the owner's boards, with its due.
+func (q *Queries) GetOwnedCard(ctx context.Context, arg GetOwnedCardParams) (GetOwnedCardRow, error) {
+	row := q.db.QueryRow(ctx, getOwnedCard, arg.ID, arg.OwnerID)
+	var i GetOwnedCardRow
+	err := row.Scan(
+		&i.ID,
+		&i.BoardID,
+		&i.Title,
+		&i.DueDate,
+		&i.DueAt,
+	)
+	return i, err
+}
+
 const getReminder = `-- name: GetReminder :one
-SELECT id, message, starts_at, rrule, local_start, next_fire_at, next_tz,
-       last_delivery_at, last_delivery_late, last_delivery_error,
-       created_at, updated_at
-FROM reminders
-WHERE id = $1 AND owner_id = $2
+SELECT r.id, r.message, r.starts_at, r.rrule, r.local_start, r.next_fire_at, r.next_tz,
+       r.last_delivery_at, r.last_delivery_late, r.last_delivery_error,
+       r.created_at, r.updated_at,
+       r.card_id, k.board_id AS card_board_id, k.title AS card_title,
+       COALESCE(c.status = 'done', false)::boolean AS card_completed,
+       COALESCE(k.archived_at IS NOT NULL, false)::boolean AS card_archived
+FROM reminders r
+LEFT JOIN cards k ON k.id = r.card_id
+LEFT JOIN columns c ON c.id = k.column_id
+WHERE r.id = $1 AND r.owner_id = $2
 `
 
 type GetReminderParams struct {
@@ -172,6 +220,11 @@ type GetReminderRow struct {
 	LastDeliveryError pgtype.Text        `json:"last_delivery_error"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	CardID            pgtype.UUID        `json:"card_id"`
+	CardBoardID       pgtype.UUID        `json:"card_board_id"`
+	CardTitle         pgtype.Text        `json:"card_title"`
+	CardCompleted     bool               `json:"card_completed"`
+	CardArchived      bool               `json:"card_archived"`
 }
 
 func (q *Queries) GetReminder(ctx context.Context, arg GetReminderParams) (GetReminderRow, error) {
@@ -190,18 +243,34 @@ func (q *Queries) GetReminder(ctx context.Context, arg GetReminderParams) (GetRe
 		&i.LastDeliveryError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CardID,
+		&i.CardBoardID,
+		&i.CardTitle,
+		&i.CardCompleted,
+		&i.CardArchived,
 	)
 	return i, err
 }
 
 const listOwnerReminders = `-- name: ListOwnerReminders :many
-SELECT id, message, starts_at, rrule, local_start, next_fire_at, next_tz,
-       last_delivery_at, last_delivery_late, last_delivery_error,
-       created_at, updated_at
-FROM reminders
-WHERE owner_id = $1
-ORDER BY created_at, id
+SELECT r.id, r.message, r.starts_at, r.rrule, r.local_start, r.next_fire_at, r.next_tz,
+       r.last_delivery_at, r.last_delivery_late, r.last_delivery_error,
+       r.created_at, r.updated_at,
+       r.card_id, k.board_id AS card_board_id, k.title AS card_title,
+       COALESCE(c.status = 'done', false)::boolean AS card_completed,
+       COALESCE(k.archived_at IS NOT NULL, false)::boolean AS card_archived
+FROM reminders r
+LEFT JOIN cards k ON k.id = r.card_id
+LEFT JOIN columns c ON c.id = k.column_id
+WHERE r.owner_id = $1
+  AND ($2::uuid IS NULL OR r.card_id = $2)
+ORDER BY r.created_at, r.id
 `
+
+type ListOwnerRemindersParams struct {
+	OwnerID uuid.UUID   `json:"owner_id"`
+	CardID  pgtype.UUID `json:"card_id"`
+}
 
 type ListOwnerRemindersRow struct {
 	ID                uuid.UUID          `json:"id"`
@@ -216,10 +285,15 @@ type ListOwnerRemindersRow struct {
 	LastDeliveryError pgtype.Text        `json:"last_delivery_error"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	CardID            pgtype.UUID        `json:"card_id"`
+	CardBoardID       pgtype.UUID        `json:"card_board_id"`
+	CardTitle         pgtype.Text        `json:"card_title"`
+	CardCompleted     bool               `json:"card_completed"`
+	CardArchived      bool               `json:"card_archived"`
 }
 
-func (q *Queries) ListOwnerReminders(ctx context.Context, ownerID uuid.UUID) ([]ListOwnerRemindersRow, error) {
-	rows, err := q.db.Query(ctx, listOwnerReminders, ownerID)
+func (q *Queries) ListOwnerReminders(ctx context.Context, arg ListOwnerRemindersParams) ([]ListOwnerRemindersRow, error) {
+	rows, err := q.db.Query(ctx, listOwnerReminders, arg.OwnerID, arg.CardID)
 	if err != nil {
 		return nil, err
 	}
@@ -240,6 +314,11 @@ func (q *Queries) ListOwnerReminders(ctx context.Context, ownerID uuid.UUID) ([]
 			&i.LastDeliveryError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CardID,
+			&i.CardBoardID,
+			&i.CardTitle,
+			&i.CardCompleted,
+			&i.CardArchived,
 		); err != nil {
 			return nil, err
 		}
@@ -315,8 +394,9 @@ SET message = COALESCE($1, message),
     local_start = CASE WHEN $2::boolean THEN $5::timestamp ELSE local_start END,
     next_fire_at = CASE WHEN $2::boolean THEN $6::timestamptz ELSE next_fire_at END,
     next_tz = CASE WHEN $2::boolean THEN $7::text ELSE next_tz END,
+    card_id = CASE WHEN $8::boolean THEN $9::uuid ELSE card_id END,
     updated_at = now()
-WHERE id = $8 AND owner_id = $9
+WHERE id = $10 AND owner_id = $11
 `
 
 type UpdateReminderParams struct {
@@ -327,6 +407,8 @@ type UpdateReminderParams struct {
 	LocalStart  pgtype.Timestamp   `json:"local_start"`
 	NextFireAt  pgtype.Timestamptz `json:"next_fire_at"`
 	NextTz      pgtype.Text        `json:"next_tz"`
+	SetCard     bool               `json:"set_card"`
+	CardID      pgtype.UUID        `json:"card_id"`
 	ID          uuid.UUID          `json:"id"`
 	OwnerID     uuid.UUID          `json:"owner_id"`
 }
@@ -341,6 +423,8 @@ func (q *Queries) UpdateReminder(ctx context.Context, arg UpdateReminderParams) 
 		arg.LocalStart,
 		arg.NextFireAt,
 		arg.NextTz,
+		arg.SetCard,
+		arg.CardID,
 		arg.ID,
 		arg.OwnerID,
 	)

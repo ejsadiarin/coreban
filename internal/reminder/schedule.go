@@ -17,7 +17,37 @@ const (
 	KindDaily  = "daily"  // Time
 	KindWeekly = "weekly" // Time on Weekdays
 	KindEvery  = "every"  // Time every Days days, counting From
+
+	// KindDue is only ever requested: once, at the reminder's card's due.
+	KindDue = "due"
 )
+
+// dueDayHour is when a "due" reminder fires for a due that is a calendar
+// day: 09:00 on that day in the owner's timezone.
+const dueDayHour = 9
+
+var errNotYourCard = errInvalid("card_id is not one of your cards")
+
+// atDue is a one-off at card c's due: its moment, or dueDateHour on its
+// date in loc.
+func atDue(c *card, loc *time.Location, now time.Time) (Schedule, error) {
+	if c == nil {
+		return Schedule{}, errInvalid(`schedule.kind "due" needs a card_id`)
+	}
+	var at time.Time
+	switch {
+	case c.due != nil:
+		at = *c.due
+	case c.dueDay != nil:
+		at = wallTime(*c.dueDay, dueDayHour, 0, loc)
+	default:
+		return Schedule{}, errInvalid("the card has no due")
+	}
+	if !at.After(now) {
+		return Schedule{}, errInvalid("the card's due has passed")
+	}
+	return Schedule{Kind: KindOnce, At: &at}, nil
+}
 
 // Schedule is when a reminder fires. Only the fields of its Kind are set.
 type Schedule struct {

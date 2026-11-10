@@ -36,6 +36,11 @@ type item struct {
 	NextFireAt   *string   `json:"next_fire_at"`
 	Paused       *string   `json:"paused"`
 	LastDelivery *delivery `json:"last_delivery"`
+	Card         *struct {
+		ID      string `json:"id"`
+		BoardID string `json:"board_id"`
+		Title   string `json:"title"`
+	} `json:"card"`
 }
 
 // owner is one caller driving the API with a fixed injected identity.

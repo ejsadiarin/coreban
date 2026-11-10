@@ -88,11 +88,22 @@ func fromRow(r dbgen.GetReminderRow, v view) (Reminder, error) {
 		at := r.StartsAt.Time.In(loc)
 		out.Schedule = Schedule{Kind: KindOnce, At: &at}
 	}
+	if r.CardID.Valid {
+		out.Card = &CardRef{ID: r.CardID.Bytes, BoardID: r.CardBoardID.Bytes, Title: r.CardTitle.String}
+	}
 	if next != nil {
 		n := next.In(loc)
 		out.NextFireAt = &n
-		if v.noTarget {
-			reason := PausedNoTarget
+		reason := ""
+		switch {
+		case v.noTarget:
+			reason = PausedNoTarget
+		case r.CardArchived:
+			reason = PausedCardArchived
+		case r.CardCompleted:
+			reason = PausedCardCompleted
+		}
+		if reason != "" {
 			out.Paused = &reason
 		}
 	}
@@ -106,8 +117,43 @@ func fromRow(r dbgen.GetReminderRow, v view) (Reminder, error) {
 	return out, nil
 }
 
-// Create adds a reminder unless the owner already has limit of them.
-func (s *Store) Create(ctx context.Context, owner uuid.UUID, message string, sched Schedule, v view, limit int) (uuid.UUID, error) {
+func nullUUID(id *uuid.UUID) pgtype.UUID {
+	if id == nil {
+		return pgtype.UUID{}
+	}
+	return pgtype.UUID{Bytes: *id, Valid: true}
+}
+
+// card is one of the owner's cards as reminders need it.
+type card struct {
+	ref CardRef
+	due *time.Time // its due as an instant; nil without one
+	// dueDay is set for a due that is a calendar day, not an instant.
+	dueDay *time.Time
+}
+
+// ownedCard looks up one of the owner's cards; any other id is invalid.
+func (s *Store) ownedCard(ctx context.Context, owner, id uuid.UUID) (card, error) {
+	row, err := dbgen.New(s.Pool).GetOwnedCard(ctx, dbgen.GetOwnedCardParams{ID: id, OwnerID: owner})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return card{}, errNotYourCard
+	}
+	if err != nil {
+		return card{}, err
+	}
+	c := card{ref: CardRef{ID: row.ID, BoardID: row.BoardID, Title: row.Title}}
+	if row.DueAt.Valid {
+		c.due = &row.DueAt.Time
+	}
+	if row.DueDate.Valid {
+		c.dueDay = &row.DueDate.Time
+	}
+	return c, nil
+}
+
+// Create adds a reminder, attached to cardID if set, unless the owner
+// already has limit of them.
+func (s *Store) Create(ctx context.Context, owner uuid.UUID, message string, sched Schedule, cardID *uuid.UUID, v view, limit int) (uuid.UUID, error) {
 	id := uuid.New()
 	row := rowOf(sched, v)
 	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
@@ -124,7 +170,7 @@ func (s *Store) Create(ctx context.Context, owner uuid.UUID, message string, sch
 		}
 		if err := q.CreateReminder(ctx, dbgen.CreateReminderParams{
 			ID: id, OwnerID: owner, Message: message, StartsAt: row.startsAt, Rrule: row.rrule,
-			LocalStart: row.localStart, NextFireAt: row.next, NextTz: row.nextTZ,
+			LocalStart: row.localStart, NextFireAt: row.next, NextTz: row.nextTZ, CardID: nullUUID(cardID),
 		}); err != nil {
 			return fmt.Errorf("insert reminder: %w", err)
 		}
@@ -145,10 +191,10 @@ func (s *Store) Get(ctx context.Context, owner, id uuid.UUID, v view) (Reminder,
 	return fromRow(row, v)
 }
 
-// List returns the owner's reminders as v shows them: soonest first, then
-// those with nothing left to send.
-func (s *Store) List(ctx context.Context, owner uuid.UUID, v view) ([]Reminder, error) {
-	rows, err := dbgen.New(s.Pool).ListOwnerReminders(ctx, owner)
+// List returns the owner's reminders (only those on cardID, if set) as v
+// shows them: soonest first, then those with nothing left to send.
+func (s *Store) List(ctx context.Context, owner uuid.UUID, cardID *uuid.UUID, v view) ([]Reminder, error) {
+	rows, err := dbgen.New(s.Pool).ListOwnerReminders(ctx, dbgen.ListOwnerRemindersParams{OwnerID: owner, CardID: nullUUID(cardID)})
 	if err != nil {
 		return nil, err
 	}
@@ -177,6 +223,9 @@ func (s *Store) List(ctx context.Context, owner uuid.UUID, v view) ([]Reminder, 
 type Edit struct {
 	Message  *string
 	Schedule *Schedule
+	// SetCard attaches the reminder to Card, or detaches it if Card is nil.
+	SetCard bool
+	Card    *uuid.UUID
 }
 
 // Edit applies e to one of the owner's reminders, seen as v.
@@ -190,6 +239,7 @@ func (s *Store) Edit(ctx context.Context, owner, id uuid.UUID, e Edit, v view) e
 		p.SetSchedule = true
 		p.StartsAt, p.Rrule, p.LocalStart, p.NextFireAt, p.NextTz = row.startsAt, row.rrule, row.localStart, row.next, row.nextTZ
 	}
+	p.SetCard, p.CardID = e.SetCard, nullUUID(e.Card)
 	return found(dbgen.New(s.Pool).UpdateReminder(ctx, p))
 }
 

@@ -73,4 +73,5 @@ type Reminder struct {
 	Rrule             pgtype.Text        `json:"rrule"`
 	LocalStart        pgtype.Timestamp   `json:"local_start"`
 	NextTz            pgtype.Text        `json:"next_tz"`
+	CardID            pgtype.UUID        `json:"card_id"`
 }

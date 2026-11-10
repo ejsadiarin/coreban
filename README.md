@@ -80,6 +80,15 @@ DTSTART, so they follow the owner when they change timezone; daylight
 saving keeps them at their local time. Responses render times in the
 owner's zone. An owner may have at most `REMINDER_CAP` reminders.
 
+A reminder can be about a card (`card_id`; its message defaults to the
+card's title, and `GET …/reminders?card_id=` lists a card's). `{"kind":
+"due"}` reminds once at the card's due: its moment, or **09:00 in the
+owner's timezone** on a date-only due; it does not follow later changes to
+the due. While the card is completed (in a Done column) or archived, its
+reminders are skipped when they come due (a one-off's moment is used up,
+a recurring one carries on from its next occurrence) and listed as
+`paused`; nothing is deleted. Deleting the card deletes them.
+
 ## Queries
 
 SQL lives in `internal/db/queries/`; `make sqlc` regenerates the typed Go in
