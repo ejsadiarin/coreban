@@ -74,7 +74,8 @@ func TestNtfyMarksALateReminderWithItsMoment(t *testing.T) {
 	if got := f.got[0].Header.Get("Title"); got != "Late reminder" {
 		t.Errorf("title = %q, want Late reminder", got)
 	}
-	if want := "standup\n\nIt was set for Tue 10 Nov 07:00 PST."; f.bodies[0] != want {
+	// The IANA zone, not "PST": Manila shares that abbreviation with US Pacific.
+	if want := "standup\n\nIt was set for Tue 10 Nov 07:00 (Asia/Manila)."; f.bodies[0] != want {
 		t.Errorf("body = %q, want %q", f.bodies[0], want)
 	}
 }

@@ -40,7 +40,9 @@ func (s *Ntfy) Notify(ctx context.Context, n Notification) error {
 	title, tags, body := "Reminder", "alarm_clock", n.Message
 	if n.Late {
 		title, tags = "Late reminder", "hourglass"
-		body += "\n\nIt was set for " + n.At.Format("Mon 2 Jan 15:04 MST") + "."
+		// The IANA zone name, not the abbreviation: Asia/Manila is "PST",
+		// which reads as US Pacific.
+		body += "\n\nIt was set for " + n.At.Format("Mon 2 Jan 15:04") + " (" + n.At.Location().String() + ")."
 	}
 	client := s.Client
 	if client == nil {
