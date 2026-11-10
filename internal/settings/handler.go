@@ -17,6 +17,9 @@ const maxSettingsBody = 4 << 10
 // targeted read (act_as); writes always bind to the caller.
 type Handler struct {
 	Store *Store
+	// Changed, when set, is told the owner saved settings, so the reminder
+	// dispatcher can wake for reminders a new target unblocks.
+	Changed func()
 }
 
 // Mount registers the settings routes on r.
@@ -61,6 +64,9 @@ func (h *Handler) put(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		helper.RespondErrorJSON(w, http.StatusInternalServerError, "failed to save settings")
 		return
+	}
+	if h.Changed != nil {
+		h.Changed()
 	}
 	helper.RespondJSON(w, http.StatusOK, v)
 }

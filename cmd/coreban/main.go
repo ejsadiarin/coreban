@@ -17,6 +17,7 @@ import (
 	"github.com/ejsadiarin/coreban/internal/auth"
 	"github.com/ejsadiarin/coreban/internal/config"
 	"github.com/ejsadiarin/coreban/internal/db"
+	"github.com/ejsadiarin/coreban/internal/reminder"
 	"github.com/ejsadiarin/coreban/internal/server"
 )
 
@@ -56,9 +57,20 @@ func serve(ctx context.Context, cfg *config.Config) error {
 	}
 	defer pool.Close()
 
+	api := server.New(pool, verifier.Middleware)
+	api.Reminders.Cap = cfg.ReminderCap
+	if cfg.NtfyURL == "" {
+		slog.Warn("coreban-api: NTFY_URL is not set; reminders will not be sent")
+	} else {
+		dispatcher := reminder.NewDispatcher(pool, &reminder.Ntfy{URL: cfg.NtfyURL, Token: cfg.NtfyToken}, time.Now)
+		api.Reminders.Changed = dispatcher.Wake
+		api.Settings.Changed = dispatcher.Wake
+		go dispatcher.Run(ctx)
+	}
+
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           server.New(pool, verifier.Middleware).Routes(),
+		Handler:           api.Routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       time.Minute,
 	}

@@ -43,3 +43,16 @@ type OwnerSetting struct {
 	Timezone  string             `json:"timezone"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
+
+type Reminder struct {
+	ID                uuid.UUID          `json:"id"`
+	OwnerID           uuid.UUID          `json:"owner_id"`
+	Message           string             `json:"message"`
+	StartsAt          pgtype.Timestamptz `json:"starts_at"`
+	NextFireAt        pgtype.Timestamptz `json:"next_fire_at"`
+	LastDeliveryAt    pgtype.Timestamptz `json:"last_delivery_at"`
+	LastDeliveryLate  bool               `json:"last_delivery_late"`
+	LastDeliveryError pgtype.Text        `json:"last_delivery_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}

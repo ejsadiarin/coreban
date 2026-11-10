@@ -111,3 +111,35 @@ Content-Type: application/json
   "ntfy_topic": "coreban-ejs-phone",
   "timezone": "Asia/Manila"
 }
+
+# ─── Reminders ─────────────────────────────────────────────────────────────
+# Times come back in your timezone (Settings). Nothing is sent while you have
+# no notification target: each pending reminder says
+# "paused": "no_notification_target".
+
+### List my reminders, soonest first, with next_fire_at and last_delivery
+
+GET {{host}}/api/coreban/reminders
+
+### Create a one-off → 201 (no offset: read in your timezone)
+
+POST {{host}}/api/coreban/reminders
+Content-Type: application/json
+
+{
+  "message": "Renew the cert",
+  "schedule": { "kind": "once", "at": "2026-12-01T09:00" }
+}
+
+### Edit the message and/or reschedule (a new moment re-arms it)
+
+PATCH {{host}}/api/coreban/reminders/PASTE_REMINDER_UUID_HERE
+Content-Type: application/json
+
+{
+  "schedule": { "kind": "once", "at": "2026-12-01T10:30:00+08:00" }
+}
+
+### Delete a reminder → 204
+
+DELETE {{host}}/api/coreban/reminders/PASTE_REMINDER_UUID_HERE

@@ -132,7 +132,14 @@ type Identity struct {
 // injected exactly where the token verifier would establish it.
 func Router(t *testing.T, id Identity) http.Handler {
 	t.Helper()
-	return server.New(Postgres(t), inject(id)).Routes()
+	return Server(t, id).Routes()
+}
+
+// Server is Router before its routes are built, for a test that changes a
+// setting (such as the reminder cap) first.
+func Server(t *testing.T, id Identity) *server.Server {
+	t.Helper()
+	return server.New(Postgres(t), inject(id))
 }
 
 // inject is a stand-in for the verifier middleware that establishes id

@@ -15,6 +15,7 @@ Kanban boards and ntfy reminders, served as a downstream service behind
 | Boards | `GET/POST /api/coreban/boards`, `GET/PATCH/DELETE /api/coreban/boards/{id}` — see `coreban-api.http` |
 | Cards | `POST /api/coreban/boards/{id}/cards`, `GET/PATCH …/cards/{cardID}`, `POST …/cards/{cardID}/move` — see `coreban-api.http` |
 | Settings | `GET/PUT /api/coreban/settings` — notification target (`ntfy_topic`) and IANA `timezone` |
+| Reminders | `GET/POST /api/coreban/reminders`, `GET/PATCH/DELETE …/reminders/{id}` — see `coreban-api.http` |
 
 coreban refuses to start if it cannot fetch the gateway's JWKS
 (`JWT_JWKS_URL`). Copy `.env.example` to `.env`, then:
@@ -49,6 +50,27 @@ ntfy access <you> coreban-<name> read-only     # each owner subscribes with thei
 With anonymous access denied, a topic name is not a secret anyone can
 subscribe to, and a leaked `NTFY_TOKEN` cannot reach topics outside
 `coreban-*`.
+
+## Reminders
+
+The dispatcher runs inside `coreban-api` when `NTFY_URL` is set. It sleeps
+until the next reminder's moment (or a create, reschedule, or settings
+save wakes it), so an idle coreban leaves the database alone. Each
+occurrence goes out at most once (ADR-0002):
+
+- **On time**: sent at its moment.
+- **Missed** (coreban was down, or the owner had no notification target):
+  a one-off is sent once when it can be, titled "Late reminder" with when
+  it was set for.
+- **ntfy not reachable yet** (down, or answering 5xx, after three quick
+  tries): put back and retried every 30 seconds.
+- **Refused** (ntfy answered 4xx, such as 403 for a topic coreban's token
+  can't write): not retried; the reminder's `last_delivery.error` says why,
+  and rescheduling it re-arms it.
+
+`schedule.at` is an RFC 3339 instant, or a wall-clock time with no offset
+(`2026-11-10T07:00`) read in the owner's timezone; responses render times
+in that zone. An owner may have at most `REMINDER_CAP` reminders.
 
 ## Queries
 

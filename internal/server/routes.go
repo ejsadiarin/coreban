@@ -31,6 +31,7 @@ func (s *Server) Routes() chi.Router {
 		r.Get("/health", s.readiness)
 		r.Route("/boards", s.Boards.Mount)
 		r.Route("/settings", s.Settings.Mount)
+		r.Route("/reminders", s.Reminders.Mount)
 	})
 
 	return r

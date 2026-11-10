@@ -3,7 +3,11 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"strconv"
+
+	"github.com/ejsadiarin/coreban/internal/reminder"
 )
 
 // Config holds coreban's environment-driven settings.
@@ -23,9 +27,13 @@ type Config struct {
 	JWTAudience string
 	JWTJWKSURL  string
 
-	// ntfy delivery for reminders.
+	// ntfy delivery for reminders. Without NtfyURL nothing is sent.
 	NtfyURL   string
 	NtfyToken string
+
+	// ReminderCap is how many reminders one owner may have (REMINDER_CAP);
+	// 0 means the variable was not a positive whole number.
+	ReminderCap int
 }
 
 // Load reads the environment, applying defaults for local development.
@@ -39,6 +47,7 @@ func Load() *Config {
 		JWTJWKSURL:   getEnv("JWT_JWKS_URL", "https://gateway.internal/.well-known/jwks.json"),
 		NtfyURL:      os.Getenv("NTFY_URL"),
 		NtfyToken:    os.Getenv("NTFY_TOKEN"),
+		ReminderCap:  positiveInt(getEnv("REMINDER_CAP", strconv.Itoa(reminder.DefaultCap))),
 	}
 }
 
@@ -46,6 +55,18 @@ func Load() *Config {
 func (c *Config) ValidateServe() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is required")
+	}
+	if c.ReminderCap == 0 {
+		return fmt.Errorf("REMINDER_CAP must be a positive whole number")
+	}
+	if c.NtfyURL != "" {
+		if u, err := url.Parse(c.NtfyURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("NTFY_URL must be an http(s) URL")
+		}
+		// The server denies anonymous access (README "ntfy server").
+		if c.NtfyToken == "" {
+			return fmt.Errorf("NTFY_TOKEN is required when NTFY_URL is set")
+		}
 	}
 	return nil
 }
@@ -56,6 +77,15 @@ func (c *Config) ValidateMigrate() error {
 		return fmt.Errorf("MIGRATION_URL is required")
 	}
 	return nil
+}
+
+// positiveInt parses s, or returns 0 if it is not a positive whole number.
+func positiveInt(s string) int {
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 {
+		return 0
+	}
+	return n
 }
 
 func getEnv(key, fallback string) string {

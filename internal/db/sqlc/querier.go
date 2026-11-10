@@ -8,26 +8,41 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
+	AdvanceReminder(ctx context.Context, arg AdvanceReminderParams) error
+	// The earliest occurrence whose moment has come, of an owner who has a
+	// notification target,
+	// locked for the claiming transaction; rows another dispatcher holds are
+	// skipped.
+	ClaimOccurrence(ctx context.Context, now pgtype.Timestamptz) (ClaimOccurrenceRow, error)
+	CountOwnerReminders(ctx context.Context, ownerID uuid.UUID) (int64, error)
 	// Every board statement is scoped by owner_id, so an owner can never read
 	// or change another owner's board. Column statements take a board_id the
 	// caller has already resolved through an owner-scoped board query.
 	CreateBoard(ctx context.Context, arg CreateBoardParams) (CreateBoardRow, error)
 	CreateCard(ctx context.Context, arg CreateCardParams) error
 	CreateColumn(ctx context.Context, arg CreateColumnParams) error
+	CreateReminder(ctx context.Context, arg CreateReminderParams) error
 	DeleteBoard(ctx context.Context, arg DeleteBoardParams) (int64, error)
+	DeleteReminder(ctx context.Context, arg DeleteReminderParams) (int64, error)
+	// When the dispatcher next has something to send.
+	EarliestFireAt(ctx context.Context) (pgtype.Timestamptz, error)
 	GetBoard(ctx context.Context, arg GetBoardParams) (GetBoardRow, error)
 	GetCard(ctx context.Context, arg GetCardParams) (GetCardRow, error)
 	// Settings are keyed by owner_id: an owner only ever reads or writes their
 	// own row.
 	GetOwnerSettings(ctx context.Context, ownerID uuid.UUID) (GetOwnerSettingsRow, error)
+	GetReminder(ctx context.Context, arg GetReminderParams) (GetReminderRow, error)
 	ListBoardCards(ctx context.Context, boardID uuid.UUID) ([]ListBoardCardsRow, error)
 	ListBoards(ctx context.Context, ownerID uuid.UUID) ([]ListBoardsRow, error)
 	// The column's cards in order, leaving out the card being placed.
 	ListColumnPositions(ctx context.Context, arg ListColumnPositionsParams) ([]ListColumnPositionsRow, error)
 	ListColumns(ctx context.Context, boardID uuid.UUID) ([]ListColumnsRow, error)
+	// Soonest first; reminders with nothing left to send last.
+	ListOwnerReminders(ctx context.Context, ownerID uuid.UUID) ([]ListOwnerRemindersRow, error)
 	LockOwnedCard(ctx context.Context, arg LockOwnedCardParams) (uuid.UUID, error)
 	// Card statements take a board_id the caller has already resolved through
 	// an owner-scoped query (LockOwnedColumn, GetBoard), or join boards to
@@ -35,14 +50,25 @@ type Querier interface {
 	// Confirms the column is on the owner's board and serialises card
 	// placement within it for the rest of the transaction.
 	LockOwnedColumn(ctx context.Context, arg LockOwnedColumnParams) (uuid.UUID, error)
+	// Owner-facing queries are scoped by owner_id. The dispatcher's queries
+	// (ClaimOccurrence onwards) work across owners.
+	// Serialises an owner's reminder creates for the transaction, so the cap
+	// check and the insert can't interleave.
+	LockOwnerReminders(ctx context.Context, ownerID uuid.UUID) error
 	PlaceCard(ctx context.Context, arg PlaceCardParams) error
 	PutOwnerSettings(ctx context.Context, arg PutOwnerSettingsParams) error
+	RecordDelivery(ctx context.Context, arg RecordDeliveryParams) error
 	RenameBoard(ctx context.Context, arg RenameBoardParams) (RenameBoardRow, error)
 	// Spreads the column's cards (except the one being placed) back to 1..n
 	// in their current order. Only needed when repeated inserts between the
 	// same neighbours exhaust the gap between them.
 	RenumberColumn(ctx context.Context, arg RenumberColumnParams) error
+	// Puts back an occurrence a send could not deliver yet, unless the owner
+	// has rescheduled the reminder since it was claimed.
+	RestoreReminder(ctx context.Context, arg RestoreReminderParams) error
 	UpdateCard(ctx context.Context, arg UpdateCardParams) (int64, error)
+	// A new starts_at re-arms the reminder at that moment.
+	UpdateReminder(ctx context.Context, arg UpdateReminderParams) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)
