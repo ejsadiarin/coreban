@@ -37,7 +37,7 @@ A named tag defined on one board and applied to that board's cards.
 _Avoid_: tag, category
 
 **Archived**:
-A card hidden from its board but kept; its reminders never fire. Distinct from deleted, which is permanent.
+A card hidden from its board but kept; its reminders never fire. A note collapsed in its feed but kept, its last content still viewable. Distinct from deleted, which is permanent.
 _Avoid_: hidden, closed, soft-deleted
 
 **Completed**:
@@ -57,3 +57,17 @@ _Avoid_: trigger, cron, timer
 **Notification target**:
 Where an owner's reminders are delivered, such as their own ntfy topic.
 _Avoid_: channel, subscription, topic
+
+### Capture
+
+**Note**:
+An item in the owner's feed: either free text they posted (a thought, a todo, a link), or a window onto one linked record. It has no done state.
+_Avoid_: message, post, entry, chat item
+
+**Linked record**:
+The one reminder, card, expense, or income a note shows. The note keeps no content of its own: it shows the record as it is now, and editing the note edits the record.
+_Avoid_: attachment, reference, embed
+
+**Feed**:
+An owner's notes in the order they were posted, newest last, like a chat with themselves.
+_Avoid_: chat, inbox, timeline, stream
