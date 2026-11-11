@@ -68,5 +68,6 @@ func (h *Handler) put(w http.ResponseWriter, r *http.Request) {
 	if h.Changed != nil {
 		h.Changed()
 	}
+	v.Saved = true
 	helper.RespondJSON(w, http.StatusOK, v)
 }

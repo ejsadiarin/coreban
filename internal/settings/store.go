@@ -34,7 +34,7 @@ func (s *Store) Get(ctx context.Context, owner uuid.UUID) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	out := Settings{Timezone: row.Timezone}
+	out := Settings{Timezone: row.Timezone, Saved: true}
 	if row.NtfyTopic.Valid {
 		out.NtfyTopic = &row.NtfyTopic.String
 	}

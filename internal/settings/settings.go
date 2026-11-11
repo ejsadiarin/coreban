@@ -14,10 +14,13 @@ import (
 )
 
 // Settings is one owner's notification settings. A nil NtfyTopic means the
-// owner has no notification target, so their reminders are not sent.
+// owner has no notification target, so their reminders are not sent. Saved
+// says the owner has saved their own; until then these are the defaults,
+// which lets a client tell a chosen UTC from an unset one. Writes ignore it.
 type Settings struct {
 	NtfyTopic *string `json:"ntfy_topic"`
 	Timezone  string  `json:"timezone"`
+	Saved     bool    `json:"saved"`
 }
 
 // defaults are an owner's settings until they save their own.

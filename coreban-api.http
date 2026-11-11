@@ -195,7 +195,7 @@ DELETE {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/labels/PASTE_LABEL_UUID
 # The owner's notification target (an ntfy topic name under coreban-, never
 # a URL) and IANA timezone. Defaults: no topic, UTC.
 
-### Get my settings
+### Get my settings ("saved": false means these are the defaults, nothing chosen yet)
 
 GET {{host}}/api/coreban/settings
 

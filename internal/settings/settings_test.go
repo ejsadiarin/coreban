@@ -17,6 +17,7 @@ const path = "/api/coreban/settings"
 type settings struct {
 	NtfyTopic *string `json:"ntfy_topic"`
 	Timezone  string  `json:"timezone"`
+	Saved     bool    `json:"saved"`
 }
 
 // owner is one caller driving the API with a fixed injected identity.
@@ -79,16 +80,19 @@ func topicOf(s settings) string {
 
 func TestANewOwnerHasNoTargetAndUTCUntilTheySaveTheirSettings(t *testing.T) {
 	o, _ := newOwner(t)
-	if got := o.get(); got.NtfyTopic != nil || got.Timezone != "UTC" {
-		t.Fatalf("fresh owner settings = topic %s, timezone %q; want no topic, UTC", topicOf(got), got.Timezone)
+	// saved: false tells a client these are the defaults, not a chosen UTC,
+	// so it may start the owner on their device's timezone.
+	if got := o.get(); got.NtfyTopic != nil || got.Timezone != "UTC" || got.Saved {
+		t.Fatalf("fresh owner settings = topic %s, timezone %q, saved %v; want no topic, UTC, unsaved", topicOf(got), got.Timezone, got.Saved)
 	}
 
-	rec := o.put("coreban-ejs_phone", "Asia/Manila")
-	if got := decode(t, rec); rec.Code != http.StatusOK || topicOf(got) != "coreban-ejs_phone" || got.Timezone != "Asia/Manila" {
+	// A saved field in the request is ignored, not stored.
+	rec := o.do(http.MethodPut, map[string]any{"ntfy_topic": "coreban-ejs_phone", "timezone": "Asia/Manila", "saved": false})
+	if got := decode(t, rec); rec.Code != http.StatusOK || topicOf(got) != "coreban-ejs_phone" || got.Timezone != "Asia/Manila" || !got.Saved {
 		t.Fatalf("put: status = %d, body %s; want 200 with the saved settings", rec.Code, rec.Body)
 	}
-	if got := o.get(); topicOf(got) != "coreban-ejs_phone" || got.Timezone != "Asia/Manila" {
-		t.Errorf("after put: topic %s, timezone %q; want coreban-ejs_phone, Asia/Manila", topicOf(got), got.Timezone)
+	if got := o.get(); topicOf(got) != "coreban-ejs_phone" || got.Timezone != "Asia/Manila" || !got.Saved {
+		t.Errorf("after put: topic %s, timezone %q, saved %v; want coreban-ejs_phone, Asia/Manila, saved", topicOf(got), got.Timezone, got.Saved)
 	}
 
 	// Clearing the topic leaves the owner without a notification target.

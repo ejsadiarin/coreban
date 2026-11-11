@@ -63,7 +63,7 @@ Kanban boards and ntfy reminders, served as a downstream service behind
 | Columns | `POST /api/coreban/boards/{id}/columns`, `PATCH/DELETE …/columns/{columnID}`, `POST …/columns/{columnID}/move` — see `coreban-api.http` |
 | Cards | `GET/POST /api/coreban/boards/{id}/cards` (`?archived=true` lists archived), `GET/PATCH/DELETE …/cards/{cardID}`, `POST …/cards/{cardID}/move` — see `coreban-api.http` |
 | Labels | `GET/POST /api/coreban/boards/{id}/labels`, `PATCH/DELETE …/labels/{labelID}`; on a card `PUT/DELETE …/cards/{cardID}/labels/{labelID}` |
-| Settings | `GET/PUT /api/coreban/settings` — notification target (`ntfy_topic`) and IANA `timezone` |
+| Settings | `GET/PUT /api/coreban/settings` — notification target (`ntfy_topic`) and IANA `timezone`; `saved` is false until the owner saves their own |
 | Reminders | `GET/POST /api/coreban/reminders`, `GET/PATCH/DELETE …/reminders/{id}` — see `coreban-api.http` |
 
 coreban refuses to start if it cannot fetch the gateway's JWKS
