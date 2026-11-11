@@ -277,3 +277,40 @@ Content-Type: application/json
 ### Delete a reminder → 204
 
 DELETE {{host}}/api/coreban/reminders/PASTE_REMINDER_UUID_HERE
+
+# ─── Feed ──────────────────────────────────────────────────────────────────
+# Notes come back oldest first. "older" is the cursor for the page before;
+# it is null once a page reaches the first note.
+
+### The newest page of my Feed (default 50 notes, at most 200)
+
+GET {{host}}/api/coreban/notes
+
+### The page before it
+
+GET {{host}}/api/coreban/notes?before=PASTE_OLDER_CURSOR_HERE&limit=50
+
+### Post a note → 201 (blank or over 4000 characters → 400)
+
+POST {{host}}/api/coreban/notes
+Content-Type: application/json
+
+{ "text": "read later https://example.com/article" }
+
+### Edit a note's text (an archived note → 409; restore it first)
+
+PATCH {{host}}/api/coreban/notes/PASTE_NOTE_UUID_HERE
+Content-Type: application/json
+
+{ "text": "read this weekend https://example.com/article" }
+
+### Archive (true) or restore (false)
+
+PATCH {{host}}/api/coreban/notes/PASTE_NOTE_UUID_HERE
+Content-Type: application/json
+
+{ "archived": true }
+
+### Permanently delete a note → 204
+
+DELETE {{host}}/api/coreban/notes/PASTE_NOTE_UUID_HERE

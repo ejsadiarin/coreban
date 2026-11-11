@@ -34,17 +34,22 @@ type Querier interface {
 	CreateCard(ctx context.Context, arg CreateCardParams) error
 	CreateColumn(ctx context.Context, arg CreateColumnParams) error
 	CreateLabel(ctx context.Context, arg CreateLabelParams) error
+	// Every note statement is scoped by owner_id, so an owner can never read or
+	// change another owner's note.
+	CreateNote(ctx context.Context, arg CreateNoteParams) (Note, error)
 	CreateReminder(ctx context.Context, arg CreateReminderParams) error
 	DeleteBoard(ctx context.Context, arg DeleteBoardParams) (int64, error)
 	DeleteCard(ctx context.Context, arg DeleteCardParams) (int64, error)
 	DeleteColumn(ctx context.Context, arg DeleteColumnParams) error
 	DeleteLabel(ctx context.Context, arg DeleteLabelParams) (int64, error)
+	DeleteNote(ctx context.Context, arg DeleteNoteParams) (int64, error)
 	DeleteReminder(ctx context.Context, arg DeleteReminderParams) (int64, error)
 	// When the dispatcher next has something to send.
 	EarliestFireAt(ctx context.Context) (pgtype.Timestamptz, error)
 	GetBoard(ctx context.Context, arg GetBoardParams) (GetBoardRow, error)
 	GetCard(ctx context.Context, arg GetCardParams) (GetCardRow, error)
 	GetColumn(ctx context.Context, arg GetColumnParams) (GetColumnRow, error)
+	GetNoteForUpdate(ctx context.Context, arg GetNoteForUpdateParams) (Note, error)
 	// A card on one of the owner's boards, with its due.
 	GetOwnedCard(ctx context.Context, arg GetOwnedCardParams) (GetOwnedCardRow, error)
 	// Settings are keyed by owner_id: an owner only ever reads or writes their
@@ -66,6 +71,10 @@ type Querier interface {
 	// Label statements take a board_id the caller has already resolved through
 	// an owner-scoped query (GetBoard), and are scoped by it.
 	ListLabels(ctx context.Context, boardID uuid.UUID) ([]ListLabelsRow, error)
+	// One page of the feed going back in time: the newest notes older than
+	// the cursor (seq below before_seq), newest first. The caller asks for one
+	// more than it shows to learn whether an older page exists.
+	ListNotes(ctx context.Context, arg ListNotesParams) ([]Note, error)
 	ListOwnerReminders(ctx context.Context, arg ListOwnerRemindersParams) ([]ListOwnerRemindersRow, error)
 	// Confirms the board is the owner's and serialises changes to its set of
 	// columns (the per-status invariant) for the rest of the transaction.
@@ -102,6 +111,7 @@ type Querier interface {
 	// set_due replaces the due (both fields; NULLs clear it), else it's kept.
 	UpdateCard(ctx context.Context, arg UpdateCardParams) (int64, error)
 	UpdateColumn(ctx context.Context, arg UpdateColumnParams) error
+	UpdateNote(ctx context.Context, arg UpdateNoteParams) (Note, error)
 	// set_schedule replaces the whole schedule, re-arming the reminder.
 	UpdateReminder(ctx context.Context, arg UpdateReminderParams) (int64, error)
 }

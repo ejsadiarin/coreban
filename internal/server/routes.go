@@ -32,6 +32,7 @@ func (s *Server) Routes() chi.Router {
 		r.Route("/boards", s.Boards.Mount)
 		r.Route("/settings", s.Settings.Mount)
 		r.Route("/reminders", s.Reminders.Mount)
+		r.Route("/notes", s.Notes.Mount)
 	})
 
 	return r

@@ -38,6 +38,13 @@ Kanban boards and ntfy reminders, served as a downstream service behind
   are skipped, never replayed. Nothing is ever sent twice (ADR-0002).
 - A per-owner cap (`REMINDER_CAP`) keeps one account from flooding ntfy.
 
+**Feed** (notes to yourself, like a chat with yourself)
+- Post plain notes, up to 4000 characters, read back newest last and
+  paged back in time by a cursor that never skips or repeats a note.
+- Edit a note's text; **archive** collapses it in place (restorable);
+  **permanently delete** is the only way to remove one. Notes are kept
+  forever otherwise. Linked records come later (ADR-0003).
+
 **Notification target and timezone**
 - Each owner sets their ntfy topic (always `coreban-…`, never a URL, one
   owner per topic) and IANA timezone. Without a topic nothing is sent, and
@@ -65,6 +72,7 @@ Kanban boards and ntfy reminders, served as a downstream service behind
 | Labels | `GET/POST /api/coreban/boards/{id}/labels`, `PATCH/DELETE …/labels/{labelID}`; on a card `PUT/DELETE …/cards/{cardID}/labels/{labelID}` |
 | Settings | `GET/PUT /api/coreban/settings` — notification target (`ntfy_topic`) and IANA `timezone`; `saved` is false until the owner saves their own |
 | Reminders | `GET/POST /api/coreban/reminders`, `GET/PATCH/DELETE …/reminders/{id}` — see `coreban-api.http` |
+| Notes | `GET/POST /api/coreban/notes` (`?before=&limit=` pages back), `PATCH/DELETE …/notes/{id}` — see `coreban-api.http` |
 
 coreban refuses to start if it cannot fetch the gateway's JWKS
 (`JWT_JWKS_URL`). Copy `.env.example` to `.env`, then:

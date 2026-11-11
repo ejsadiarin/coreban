@@ -52,6 +52,16 @@ type Label struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type Note struct {
+	ID         uuid.UUID          `json:"id"`
+	OwnerID    uuid.UUID          `json:"owner_id"`
+	Seq        int64              `json:"seq"`
+	Body       string             `json:"body"`
+	ArchivedAt pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type OwnerSetting struct {
 	OwnerID   uuid.UUID          `json:"owner_id"`
 	NtfyTopic pgtype.Text        `json:"ntfy_topic"`

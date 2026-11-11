@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ejsadiarin/coreban/internal/board"
+	"github.com/ejsadiarin/coreban/internal/note"
 	"github.com/ejsadiarin/coreban/internal/reminder"
 	"github.com/ejsadiarin/coreban/internal/settings"
 )
@@ -21,6 +22,7 @@ type Server struct {
 	Boards       *board.Handler
 	Settings     *settings.Handler
 	Reminders    *reminder.Handler
+	Notes        *note.Handler
 }
 
 // New wires a Server. It panics on a nil authenticate: serving the API
@@ -41,5 +43,6 @@ func New(pool *pgxpool.Pool, authenticate func(http.Handler) http.Handler) *Serv
 			Cap:      reminder.DefaultCap,
 			Now:      time.Now,
 		},
+		Notes: &note.Handler{Store: &note.Store{Pool: pool}},
 	}
 }
