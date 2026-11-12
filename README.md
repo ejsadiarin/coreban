@@ -60,6 +60,27 @@ Kanban boards and ntfy reminders, served as a downstream service behind
   Archiving such a note archives only the note: the web deletes the record
   first.
 
+**Attachments** (ADR-0004)
+- A plain note can carry up to 10 images or videos, with or without text
+  (its caption). Images arrive as WebP (compressed on the phone, at most
+  5 MB) or an animated GIF; videos as MP4, WebM or MOV, at most 25 MB,
+  with an optional poster frame. They are fixed once posted; a caption
+  can be edited or cleared.
+- Bytes live in an S3-compatible bucket (R2 in production), never in
+  Postgres. The web asks for a signed upload link per file, PUTs the file
+  straight to the bucket (the signature pins its size and type), then
+  posts the note naming the uploads; coreban checks each is there. The
+  Feed shows each attachment with a read link signed afresh (an hour),
+  and a filename for Download. An admin's targeted read lists another
+  owner's attachments without links. A read link is reused while it has
+  over half its hour left, so the phone's cache can serve the file. An
+  upload link works for 15 minutes; within them the owner could replace
+  their own file with another of the same size and type (accepted).
+- Each owner may store `ATTACHMENT_QUOTA` (default 5GB), counting
+  archived notes and unfinished uploads; admins have no quota. Demo
+  guests (the gateway's `guest` scope) can't upload. Without
+  `S3_ENDPOINT` attachments are off and uploads answer 503.
+
 **Notification target and timezone**
 - Each owner sets their ntfy topic (always `coreban-…`, never a URL, one
   owner per topic) and IANA timezone. Without a topic nothing is sent, and
@@ -88,6 +109,7 @@ Kanban boards and ntfy reminders, served as a downstream service behind
 | Settings | `GET/PUT /api/coreban/settings` — notification target (`ntfy_topic`) and IANA `timezone`; `saved` is false until the owner saves their own |
 | Reminders | `GET/POST /api/coreban/reminders`, `GET/PATCH/DELETE …/reminders/{id}` — see `coreban-api.http` |
 | Notes | `GET/POST /api/coreban/notes` (`?before=&limit=` pages back), `PATCH/DELETE …/notes/{id}` — see `coreban-api.http` |
+| Attachments | `POST /api/coreban/attachments` — a signed upload link for one image or video; post the note with `"attachments": [ids]` |
 
 coreban refuses to start if it cannot fetch the gateway's JWKS
 (`JWT_JWKS_URL`). Copy `.env.example` to `.env`, then:
@@ -158,6 +180,15 @@ the due. While the card is completed (in a Done column) or archived, its
 reminders are skipped when they come due (a one-off's moment is used up,
 a recurring one carries on from its next occurrence) and listed as
 `paused`; nothing is deleted. Deleting the card deletes them.
+
+## Attachments bucket
+
+Any S3-compatible bucket works (`S3_*` in `.env.example`). For R2: create
+a private bucket, an API token with object read and write on it alone,
+and a CORS rule allowing `PUT` and `GET` (header `content-type`) from the
+dashboard's origins, since phones upload and read directly. Tests and the
+e2e stack use versitygw locally (`internal/testharness/bucket.go`,
+`internal/tools/s3setup`).
 
 ## Queries
 

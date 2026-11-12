@@ -9,6 +9,20 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Attachment struct {
+	ID          uuid.UUID          `json:"id"`
+	OwnerID     uuid.UUID          `json:"owner_id"`
+	NoteID      pgtype.UUID        `json:"note_id"`
+	Position    pgtype.Int2        `json:"position"`
+	Kind        string             `json:"kind"`
+	ContentType string             `json:"content_type"`
+	SizeBytes   int64              `json:"size_bytes"`
+	Width       pgtype.Int4        `json:"width"`
+	Height      pgtype.Int4        `json:"height"`
+	PosterBytes pgtype.Int8        `json:"poster_bytes"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type Board struct {
 	ID        uuid.UUID          `json:"id"`
 	OwnerID   uuid.UUID          `json:"owner_id"`
@@ -53,19 +67,20 @@ type Label struct {
 }
 
 type Note struct {
-	ID           uuid.UUID          `json:"id"`
-	OwnerID      uuid.UUID          `json:"owner_id"`
-	Seq          int64              `json:"seq"`
-	Body         pgtype.Text        `json:"body"`
-	ArchivedAt   pgtype.Timestamptz `json:"archived_at"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	LinkKind     pgtype.Text        `json:"link_kind"`
-	ReminderID   pgtype.UUID        `json:"reminder_id"`
-	CardID       pgtype.UUID        `json:"card_id"`
-	Snapshot     []byte             `json:"snapshot"`
-	ArchivedCard bool               `json:"archived_card"`
-	RecordID     pgtype.UUID        `json:"record_id"`
+	ID              uuid.UUID          `json:"id"`
+	OwnerID         uuid.UUID          `json:"owner_id"`
+	Seq             int64              `json:"seq"`
+	Body            pgtype.Text        `json:"body"`
+	ArchivedAt      pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	LinkKind        pgtype.Text        `json:"link_kind"`
+	ReminderID      pgtype.UUID        `json:"reminder_id"`
+	CardID          pgtype.UUID        `json:"card_id"`
+	Snapshot        []byte             `json:"snapshot"`
+	ArchivedCard    bool               `json:"archived_card"`
+	RecordID        pgtype.UUID        `json:"record_id"`
+	AttachmentCount int16              `json:"attachment_count"`
 }
 
 type NoteCard struct {

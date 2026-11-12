@@ -13,7 +13,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/sync/errgroup"
 
+	"github.com/ejsadiarin/coreban/internal/attachment"
 	dbgen "github.com/ejsadiarin/coreban/internal/db/sqlc"
 	"github.com/ejsadiarin/coreban/internal/feedlink"
 	"github.com/ejsadiarin/coreban/internal/reminder"
@@ -29,20 +31,81 @@ type Store struct {
 	Pool *pgxpool.Pool
 	// Reminders renders linked reminders.
 	Reminders ReminderRenderer
+	// Bucket holds attachment files; nil when none is configured.
+	Bucket *attachment.Bucket
 }
 
 func (s *Store) queries() *dbgen.Queries { return dbgen.New(s.Pool) }
 
-// Post adds a note to the end of the owner's feed. text must already be
-// clean (CleanText).
-func (s *Store) Post(ctx context.Context, owner uuid.UUID, text string) (Note, error) {
-	row, err := s.queries().CreateNote(ctx, dbgen.CreateNoteParams{
-		ID: uuid.New(), OwnerID: owner, Body: pgtype.Text{String: text, Valid: true},
+// Post adds a note to the end of the owner's feed: text (already clean,
+// CleanText; empty for none), uploads (attachment ids, distinct, at most
+// attachment.MaxPerNote, in album order), or both. Each upload must be
+// the owner's, not yet posted (ErrNotYourUpload), and in the bucket at the
+// size it declared (ErrNotUploaded).
+func (s *Store) Post(ctx context.Context, owner uuid.UUID, text string, uploads []uuid.UUID) (Note, error) {
+	if text == "" && len(uploads) == 0 {
+		return Note{}, ErrTextRequired
+	}
+	if len(uploads) > 0 {
+		if err := s.checkUploads(ctx, owner, uploads); err != nil {
+			return Note{}, err
+		}
+	}
+	var row dbgen.Note
+	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+		q := dbgen.New(tx)
+		var err error
+		row, err = q.CreateNote(ctx, dbgen.CreateNoteParams{
+			ID: uuid.New(), OwnerID: owner, Body: pgtype.Text{String: text, Valid: text != ""},
+			AttachmentCount: int16(len(uploads)),
+		})
+		if err != nil || len(uploads) == 0 {
+			return err
+		}
+		// Another post may have taken an upload since checkUploads.
+		n, err := q.AttachToNote(ctx, dbgen.AttachToNoteParams{
+			NoteID: pgtype.UUID{Bytes: row.ID, Valid: true}, OwnerID: owner, Ids: uploads,
+		})
+		if err == nil && n != int64(len(uploads)) {
+			err = ErrNotYourUpload
+		}
+		return err
 	})
 	if err != nil {
 		return Note{}, err
 	}
 	return s.one(ctx, owner, row)
+}
+
+// checkUploads makes sure every upload is the owner's, waiting, and whole
+// in the bucket. It runs before the note's transaction: it calls the
+// bucket, which shouldn't hold a transaction open.
+func (s *Store) checkUploads(ctx context.Context, owner uuid.UUID, uploads []uuid.UUID) error {
+	if s.Bucket == nil {
+		return attachment.ErrNoBucket
+	}
+	rows, err := s.queries().ListUploads(ctx, dbgen.ListUploadsParams{OwnerID: owner, Ids: uploads})
+	if err != nil {
+		return err
+	}
+	if len(rows) != len(uploads) {
+		return ErrNotYourUpload
+	}
+	// One round trip for all of them, not one per file.
+	g, gctx := errgroup.WithContext(ctx)
+	for _, a := range rows {
+		g.Go(func() error {
+			ok, err := s.Bucket.Uploaded(gctx, a)
+			if err != nil {
+				return fmt.Errorf("check upload %s: %w", a.ID, err)
+			}
+			if !ok {
+				return ErrNotUploaded
+			}
+			return nil
+		})
+	}
+	return g.Wait()
 }
 
 // PostRecord adds a note to the end of the owner's feed showing the
@@ -67,8 +130,10 @@ func (s *Store) PostRecord(ctx context.Context, owner uuid.UUID, kind string, re
 const uniqueViolation = "23505"
 
 // Feed returns one page of the owner's feed: the newest size notes posted
-// before the cursor (or the newest of all, with none), oldest first.
-func (s *Store) Feed(ctx context.Context, owner uuid.UUID, before *Cursor, size int) (Page, error) {
+// before the cursor (or the newest of all, with none), oldest first. Links
+// to attachments are signed only with links set: an admin's targeted read
+// of another owner sees that they exist, never the files.
+func (s *Store) Feed(ctx context.Context, owner uuid.UUID, before *Cursor, size int, links bool) (Page, error) {
 	params := dbgen.ListNotesParams{OwnerID: owner, RowLimit: int32(size + 1)}
 	if before != nil {
 		params.BeforeSeq = pgtype.Int8{Int64: int64(*before), Valid: true}
@@ -84,7 +149,7 @@ func (s *Store) Feed(ctx context.Context, owner uuid.UUID, before *Cursor, size 
 		rows = rows[:size]
 	}
 	slices.Reverse(rows)
-	if p.Notes, err = s.render(ctx, owner, rows); err != nil {
+	if p.Notes, err = s.render(ctx, owner, rows, links); err != nil {
 		return Page{}, err
 	}
 	return p, nil
@@ -92,7 +157,8 @@ func (s *Store) Feed(ctx context.Context, owner uuid.UUID, before *Cursor, size 
 
 // Edit is a change to one note; nil fields are left as they are.
 type Edit struct {
-	// Text must already be clean (CleanText).
+	// Text must already be clean (CleanText); empty clears it, which only
+	// a note with attachments may do (ErrTextRequired).
 	Text     *string
 	Archived *bool
 	// Snapshot is what the web last showed of an expense or income it
@@ -155,7 +221,10 @@ func (s *Store) Edit(ctx context.Context, owner, id uuid.UUID, e Edit) (Note, er
 			case archivedAt.Valid:
 				return ErrArchived
 			}
-			body = pgtype.Text{String: *e.Text, Valid: true}
+			if *e.Text == "" && cur.AttachmentCount == 0 {
+				return ErrTextRequired
+			}
+			body = pgtype.Text{String: *e.Text, Valid: *e.Text != ""}
 		}
 		row, err = q.UpdateNote(ctx, dbgen.UpdateNoteParams{
 			ID: id, OwnerID: owner, Body: body, ArchivedAt: archivedAt, ArchivedCard: archivedCard,
@@ -201,7 +270,7 @@ func (s *Store) Delete(ctx context.Context, owner, id uuid.UUID) error {
 }
 
 func (s *Store) one(ctx context.Context, owner uuid.UUID, row dbgen.Note) (Note, error) {
-	notes, err := s.render(ctx, owner, []dbgen.Note{row})
+	notes, err := s.render(ctx, owner, []dbgen.Note{row}, true)
 	if err != nil {
 		return Note{}, err
 	}
@@ -209,10 +278,14 @@ func (s *Store) one(ctx context.Context, owner uuid.UUID, row dbgen.Note) (Note,
 }
 
 // render turns rows into notes, reading every linked record live in one
-// query per kind, and a deleted one from its note's snapshot.
-func (s *Store) render(ctx context.Context, owner uuid.UUID, rows []dbgen.Note) ([]Note, error) {
-	var reminderIDs, cardIDs []uuid.UUID
+// query per kind, and a deleted one from its note's snapshot. links signs
+// attachment links (see Feed).
+func (s *Store) render(ctx context.Context, owner uuid.UUID, rows []dbgen.Note, links bool) ([]Note, error) {
+	var reminderIDs, cardIDs, attachedIDs []uuid.UUID
 	for _, r := range rows {
+		if r.AttachmentCount > 0 {
+			attachedIDs = append(attachedIDs, r.ID)
+		}
 		if r.ReminderID.Valid {
 			reminderIDs = append(reminderIDs, r.ReminderID.Bytes)
 		}
@@ -271,9 +344,27 @@ func (s *Store) render(ctx context.Context, owner uuid.UUID, rows []dbgen.Note) 
 		}
 	}
 
+	attached := map[uuid.UUID][]attachment.View{}
+	if len(attachedIDs) > 0 {
+		all, err := q.ListNoteAttachments(ctx, dbgen.ListNoteAttachmentsParams{OwnerID: owner, NoteIds: attachedIDs})
+		if err != nil {
+			return nil, err
+		}
+		views, err := attachment.Render(ctx, s.Bucket, all, links)
+		if err != nil {
+			return nil, err
+		}
+		for i, a := range all {
+			attached[a.NoteID.Bytes] = append(attached[a.NoteID.Bytes], views[i])
+		}
+	}
+
 	out := make([]Note, len(rows))
 	for i, r := range rows {
-		n := Note{ID: r.ID, Text: r.Body.String, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time}
+		n := Note{
+			ID: r.ID, Text: r.Body.String, Attachments: attached[r.ID],
+			CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
+		}
 		if r.ArchivedAt.Valid {
 			at := r.ArchivedAt.Time
 			n.ArchivedAt = &at

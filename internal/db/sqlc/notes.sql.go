@@ -60,21 +60,29 @@ func (q *Queries) CreateLinkedNote(ctx context.Context, arg CreateLinkedNotePara
 
 const createNote = `-- name: CreateNote :one
 
-INSERT INTO notes (id, owner_id, body)
-VALUES ($1, $2, $3)
-RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id
+INSERT INTO notes (id, owner_id, body, attachment_count)
+VALUES ($1, $2, $3, $4)
+RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id, attachment_count
 `
 
 type CreateNoteParams struct {
-	ID      uuid.UUID   `json:"id"`
-	OwnerID uuid.UUID   `json:"owner_id"`
-	Body    pgtype.Text `json:"body"`
+	ID              uuid.UUID   `json:"id"`
+	OwnerID         uuid.UUID   `json:"owner_id"`
+	Body            pgtype.Text `json:"body"`
+	AttachmentCount int16       `json:"attachment_count"`
 }
 
 // Every note statement is scoped by owner_id, so an owner can never read or
 // change another owner's note.
+// A plain note: text, attachments (counted here, attached by
+// AttachToNote in the same transaction), or both.
 func (q *Queries) CreateNote(ctx context.Context, arg CreateNoteParams) (Note, error) {
-	row := q.db.QueryRow(ctx, createNote, arg.ID, arg.OwnerID, arg.Body)
+	row := q.db.QueryRow(ctx, createNote,
+		arg.ID,
+		arg.OwnerID,
+		arg.Body,
+		arg.AttachmentCount,
+	)
 	var i Note
 	err := row.Scan(
 		&i.ID,
@@ -90,6 +98,7 @@ func (q *Queries) CreateNote(ctx context.Context, arg CreateNoteParams) (Note, e
 		&i.Snapshot,
 		&i.ArchivedCard,
 		&i.RecordID,
+		&i.AttachmentCount,
 	)
 	return i, err
 }
@@ -97,7 +106,7 @@ func (q *Queries) CreateNote(ctx context.Context, arg CreateNoteParams) (Note, e
 const createRecordNote = `-- name: CreateRecordNote :one
 INSERT INTO notes (id, owner_id, link_kind, record_id)
 VALUES ($1, $2, $3, $4)
-RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id
+RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id, attachment_count
 `
 
 type CreateRecordNoteParams struct {
@@ -132,6 +141,7 @@ func (q *Queries) CreateRecordNote(ctx context.Context, arg CreateRecordNotePara
 		&i.Snapshot,
 		&i.ArchivedCard,
 		&i.RecordID,
+		&i.AttachmentCount,
 	)
 	return i, err
 }
@@ -171,7 +181,7 @@ func (q *Queries) DeleteNote(ctx context.Context, arg DeleteNoteParams) (int64, 
 }
 
 const getNoteForUpdate = `-- name: GetNoteForUpdate :one
-SELECT id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id
+SELECT id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id, attachment_count
 FROM notes
 WHERE id = $1 AND owner_id = $2
 FOR UPDATE
@@ -199,6 +209,7 @@ func (q *Queries) GetNoteForUpdate(ctx context.Context, arg GetNoteForUpdatePara
 		&i.Snapshot,
 		&i.ArchivedCard,
 		&i.RecordID,
+		&i.AttachmentCount,
 	)
 	return i, err
 }
@@ -206,7 +217,7 @@ func (q *Queries) GetNoteForUpdate(ctx context.Context, arg GetNoteForUpdatePara
 const linkNote = `-- name: LinkNote :execrows
 UPDATE notes
 SET body = NULL, link_kind = $3, reminder_id = $4, card_id = $5, updated_at = now()
-WHERE id = $1 AND owner_id = $2 AND link_kind IS NULL AND archived_at IS NULL
+WHERE id = $1 AND owner_id = $2 AND link_kind IS NULL AND archived_at IS NULL AND attachment_count = 0
 `
 
 type LinkNoteParams struct {
@@ -218,7 +229,8 @@ type LinkNoteParams struct {
 }
 
 // Converts one of the owner's live plain notes in place: it keeps its place
-// in the feed and drops its own text for the record's.
+// in the feed and drops its own text for the record's. A note with
+// attachments stays a plain note.
 func (q *Queries) LinkNote(ctx context.Context, arg LinkNoteParams) (int64, error) {
 	result, err := q.db.Exec(ctx, linkNote,
 		arg.ID,
@@ -359,7 +371,7 @@ func (q *Queries) ListNoteReminders(ctx context.Context, arg ListNoteRemindersPa
 }
 
 const listNotes = `-- name: ListNotes :many
-SELECT id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id
+SELECT id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id, attachment_count
 FROM notes
 WHERE owner_id = $1
   AND ($2::bigint IS NULL OR seq < $2::bigint)
@@ -399,6 +411,7 @@ func (q *Queries) ListNotes(ctx context.Context, arg ListNotesParams) ([]Note, e
 			&i.Snapshot,
 			&i.ArchivedCard,
 			&i.RecordID,
+			&i.AttachmentCount,
 		); err != nil {
 			return nil, err
 		}
@@ -433,7 +446,7 @@ const updateNote = `-- name: UpdateNote :one
 UPDATE notes
 SET body = $3, archived_at = $4, archived_card = $5, updated_at = now()
 WHERE id = $1 AND owner_id = $2
-RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id
+RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id, attachment_count
 `
 
 type UpdateNoteParams struct {
@@ -467,6 +480,7 @@ func (q *Queries) UpdateNote(ctx context.Context, arg UpdateNoteParams) (Note, e
 		&i.Snapshot,
 		&i.ArchivedCard,
 		&i.RecordID,
+		&i.AttachmentCount,
 	)
 	return i, err
 }

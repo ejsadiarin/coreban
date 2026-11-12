@@ -27,8 +27,8 @@ const (
 func CrossService(kind string) bool { return kind == KindExpense || kind == KindIncome }
 
 // ErrNotLinkable is returned for a note that can't take a record: it
-// isn't one of the owner's live plain notes.
-var ErrNotLinkable = errors.New("note must be one of your plain notes, not archived")
+// isn't one of the owner's live plain notes without attachments.
+var ErrNotLinkable = errors.New("note must be one of your plain notes, not archived and without attachments")
 
 // errBadTarget is a "note" value that is neither "new" nor a note id.
 var errBadTarget = errors.New(`note must be "new" or a note's id`)

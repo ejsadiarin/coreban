@@ -2,8 +2,10 @@
 -- change another owner's note.
 
 -- name: CreateNote :one
-INSERT INTO notes (id, owner_id, body)
-VALUES ($1, $2, $3)
+-- A plain note: text, attachments (counted here, attached by
+-- AttachToNote in the same transaction), or both.
+INSERT INTO notes (id, owner_id, body, attachment_count)
+VALUES ($1, $2, $3, $4)
 RETURNING *;
 
 -- name: ListNotes :many
@@ -40,10 +42,11 @@ VALUES ($1, $2, $3, $4, $5);
 
 -- name: LinkNote :execrows
 -- Converts one of the owner's live plain notes in place: it keeps its place
--- in the feed and drops its own text for the record's.
+-- in the feed and drops its own text for the record's. A note with
+-- attachments stays a plain note.
 UPDATE notes
 SET body = NULL, link_kind = $3, reminder_id = $4, card_id = $5, updated_at = now()
-WHERE id = $1 AND owner_id = $2 AND link_kind IS NULL AND archived_at IS NULL;
+WHERE id = $1 AND owner_id = $2 AND link_kind IS NULL AND archived_at IS NULL AND attachment_count = 0;
 
 -- name: ListNoteReminders :many
 -- The owner's reminders among ids, as their notes show them.

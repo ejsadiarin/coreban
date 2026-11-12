@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/ejsadiarin/coreban/internal/attachment"
 	"github.com/ejsadiarin/coreban/internal/auth"
 	"github.com/ejsadiarin/coreban/internal/config"
 	"github.com/ejsadiarin/coreban/internal/db"
@@ -59,6 +60,15 @@ func serve(ctx context.Context, cfg *config.Config) error {
 
 	api := server.New(pool, verifier.Middleware)
 	api.Reminders.Cap = cfg.ReminderCap
+	if cfg.Bucket.Endpoint == "" {
+		slog.Warn("coreban-api: S3_ENDPOINT is not set; attachments are off")
+	} else {
+		bucket, err := attachment.NewBucket(cfg.Bucket)
+		if err != nil {
+			return err
+		}
+		api.UseAttachments(bucket, cfg.AttachmentQuota)
+	}
 	if cfg.NtfyURL == "" {
 		slog.Warn("coreban-api: NTFY_URL is not set; reminders will not be sent")
 	} else {

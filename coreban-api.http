@@ -286,7 +286,9 @@ DELETE {{host}}/api/coreban/reminders/PASTE_REMINDER_UUID_HERE
 # title, archived_at}}, live, or its last state once deleted. An expense or
 # income note has "kind": "expense"|"income" and "record_id"; the web reads
 # the record from corefinance, and "expense"/"income" holds its snapshot
-# once the web found it gone ("deleted": true).
+# once the web found it gone ("deleted": true). A plain note may also list
+# "attachments": [{id, kind, content_type, size, width, height, filename,
+# url, poster_url}], in album order, with links signed for an hour.
 
 ### The newest page of my Feed (default 50 notes, at most 200)
 
@@ -359,3 +361,39 @@ PATCH {{host}}/api/coreban/notes/PASTE_NOTE_UUID_HERE
 Content-Type: application/json
 
 { "archived": true, "snapshot": { "id": "PASTE_EXPENSE_UUID_HERE", "amount": 250, "description": "Lunch" } }
+
+# ─── Attachments ───────────────────────────────────────────────────────────
+# Images and videos on plain notes (ADR-0004). 403 for a demo guest, 413
+# over 5 MB (image) / 25 MB (video) / 1 MB (poster), 409 over the quota,
+# 503 when no bucket is configured.
+
+### Get an upload link for one image (WebP or GIF) → 201 {id, upload: {url, method, headers}}
+# PUT the file to upload.url with exactly those headers; the signature pins
+# its size and type.
+
+POST {{host}}/api/coreban/attachments
+Content-Type: application/json
+
+{ "kind": "image", "content_type": "image/webp", "size": 482113, "width": 2048, "height": 1536 }
+
+### A video with its poster frame → also poster_upload
+
+POST {{host}}/api/coreban/attachments
+Content-Type: application/json
+
+{ "kind": "video", "content_type": "video/mp4", "size": 18874368, "poster": { "size": 40960 } }
+
+### Post the note once every upload finished: up to 10, in album order,
+### text optional (409 if a file isn't in the bucket yet)
+
+POST {{host}}/api/coreban/notes
+Content-Type: application/json
+
+{ "text": "sunset at the pier", "attachments": ["PASTE_ATTACHMENT_UUID_HERE"] }
+
+### Clear a caption (only a note with attachments may have none)
+
+PATCH {{host}}/api/coreban/notes/PASTE_NOTE_UUID_HERE
+Content-Type: application/json
+
+{ "text": "" }

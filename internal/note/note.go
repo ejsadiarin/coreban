@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/ejsadiarin/coreban/internal/attachment"
 	"github.com/ejsadiarin/coreban/internal/reminder"
 )
 
@@ -29,11 +30,24 @@ var (
 	// ErrRecordTaken is returned when linking a record that already has a
 	// note: a record has at most one.
 	ErrRecordTaken = errors.New("record already has a note")
+	// ErrTextRequired is returned for a note with no text and nothing else
+	// to show: only a note with attachments may have none.
+	ErrTextRequired = errBlank
+	// ErrNotYourUpload is returned when a note names an attachment that
+	// isn't one of the owner's uploads waiting to be posted.
+	ErrNotYourUpload = errors.New("each attachment must be an upload of yours not yet posted")
+	// ErrNotUploaded is returned when a note names an upload whose file
+	// (or poster) isn't in the bucket at the size it declared yet.
+	ErrNotUploaded = errors.New("an attachment hasn't finished uploading")
 	// ErrTakesNoSnapshot is returned when the web offers a snapshot for a
 	// note whose snapshot coreban keeps itself (a reminder or card), or a
 	// plain note, which has none.
 	ErrTakesNoSnapshot = errors.New("note takes no snapshot from the web")
 )
+
+// errBlank is CleanText's answer for blank text, which a note with
+// attachments may have.
+var errBlank = errors.New("text is required")
 
 // MaxTextLength is the most characters a note's text may hold.
 const MaxTextLength = 4000
@@ -52,6 +66,8 @@ type Note struct {
 	Text string `json:"text"`
 	// Link is the record a linked note shows; nil on a plain note.
 	Link *Link `json:"link"`
+	// Attachments are a plain note's images and videos, in album order.
+	Attachments []attachment.View `json:"attachments,omitempty"`
 	// ArchivedAt is set while the note is archived: collapsed in the feed,
 	// kept, and still in its place.
 	ArchivedAt *time.Time `json:"archived_at"`
@@ -118,7 +134,7 @@ func CleanText(s string) (string, error) {
 	s = strings.TrimSpace(s)
 	switch {
 	case s == "":
-		return "", errors.New("text is required")
+		return "", errBlank
 	case utf8.RuneCountInString(s) > MaxTextLength:
 		return "", errors.New("text is longer than " + strconv.Itoa(MaxTextLength) + " characters")
 	}

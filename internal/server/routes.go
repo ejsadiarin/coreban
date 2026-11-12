@@ -33,6 +33,7 @@ func (s *Server) Routes() chi.Router {
 		r.Route("/settings", s.Settings.Mount)
 		r.Route("/reminders", s.Reminders.Mount)
 		r.Route("/notes", s.Notes.Mount)
+		r.Route("/attachments", s.Attachments.Mount)
 	})
 
 	return r

@@ -10,6 +10,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/ejsadiarin/coreban/internal/attachment"
+	"github.com/ejsadiarin/coreban/internal/auth"
 	"github.com/ejsadiarin/coreban/internal/feedlink"
 	"github.com/ejsadiarin/coreban/internal/helper"
 )
@@ -58,7 +60,8 @@ func (h *Handler) feed(w http.ResponseWriter, r *http.Request) {
 		}
 		before = &c
 	}
-	p, err := h.Store.Feed(r.Context(), owner, before, size)
+	caller, _ := auth.UserIDFromContext(r.Context())
+	p, err := h.Store.Feed(r.Context(), owner, before, size, owner == caller)
 	if err != nil {
 		helper.RespondErrorJSON(w, http.StatusInternalServerError, "failed to load the feed")
 		return
@@ -66,12 +69,14 @@ func (h *Handler) feed(w http.ResponseWriter, r *http.Request) {
 	helper.RespondJSON(w, http.StatusOK, p)
 }
 
-// postRequest posts plain text, or links an expense or income the web
+// postRequest posts plain text, attachments the web has uploaded (with
+// optional text as their caption), or links an expense or income the web
 // just created in corefinance. Reminders and cards get their note when
 // they are created ("note": "new").
 type postRequest struct {
-	Text string       `json:"text"`
-	Link *linkRequest `json:"link"`
+	Text        string       `json:"text"`
+	Attachments *[]string    `json:"attachments"`
+	Link        *linkRequest `json:"link"`
 }
 
 type linkRequest struct {
@@ -89,20 +94,53 @@ func (h *Handler) post(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Link != nil {
+		if req.Attachments != nil {
+			helper.RespondErrorJSON(w, http.StatusBadRequest, "a linked note takes no attachments")
+			return
+		}
 		h.postRecord(w, r, owner, req)
 		return
 	}
+	uploads, ok := uploadIDs(w, req.Attachments)
+	if !ok {
+		return
+	}
+	// Blank text is a note of attachments alone; the store refuses it
+	// with none.
 	text, err := CleanText(req.Text)
-	if err != nil {
+	if err != nil && !errors.Is(err, errBlank) {
 		helper.RespondErrorJSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	n, err := h.Store.Post(r.Context(), owner, text)
-	if err != nil {
-		helper.RespondErrorJSON(w, http.StatusInternalServerError, "failed to post note")
-		return
+	n, err := h.Store.Post(r.Context(), owner, text, uploads)
+	if !respondStoreError(w, err, "failed to post note") {
+		helper.RespondJSON(w, http.StatusCreated, n)
 	}
-	helper.RespondJSON(w, http.StatusCreated, n)
+}
+
+// uploadIDs reads the attachments a note names: distinct ids, at most
+// attachment.MaxPerNote. None named (nil) is a text-only note.
+func uploadIDs(w http.ResponseWriter, named *[]string) ([]uuid.UUID, bool) {
+	if named == nil {
+		return nil, true
+	}
+	if len(*named) == 0 || len(*named) > attachment.MaxPerNote {
+		helper.RespondErrorJSON(w, http.StatusBadRequest,
+			"attachments must name 1 to "+strconv.Itoa(attachment.MaxPerNote)+" uploads")
+		return nil, false
+	}
+	ids := make([]uuid.UUID, len(*named))
+	seen := map[uuid.UUID]bool{}
+	for i, s := range *named {
+		id, err := uuid.Parse(s)
+		if err != nil || seen[id] {
+			helper.RespondErrorJSON(w, http.StatusBadRequest, "attachments must be distinct upload ids")
+			return nil, false
+		}
+		seen[id] = true
+		ids[i] = id
+	}
+	return ids, true
 }
 
 func (h *Handler) postRecord(w http.ResponseWriter, r *http.Request, owner uuid.UUID, req postRequest) {
@@ -154,8 +192,10 @@ func (h *Handler) edit(w http.ResponseWriter, r *http.Request) {
 		e.Snapshot = req.Snapshot
 	}
 	if req.Text != nil {
+		// Blank clears a caption; the store refuses it on a note with
+		// nothing else to show.
 		text, err := CleanText(*req.Text)
-		if err != nil {
+		if err != nil && !errors.Is(err, errBlank) {
 			helper.RespondErrorJSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -215,6 +255,12 @@ func respondStoreError(w http.ResponseWriter, err error, msg string) bool {
 		helper.RespondErrorJSON(w, http.StatusConflict, "the note shows a linked record; edit the record instead")
 	case errors.Is(err, ErrRecordTaken):
 		helper.RespondErrorJSON(w, http.StatusConflict, "that record already has a note")
+	case errors.Is(err, ErrTextRequired), errors.Is(err, ErrNotYourUpload):
+		helper.RespondErrorJSON(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, ErrNotUploaded):
+		helper.RespondErrorJSON(w, http.StatusConflict, "an attachment hasn't finished uploading; try again once it has")
+	case errors.Is(err, attachment.ErrNoBucket):
+		helper.RespondErrorJSON(w, http.StatusServiceUnavailable, err.Error())
 	case errors.Is(err, ErrTakesNoSnapshot):
 		helper.RespondErrorJSON(w, http.StatusConflict, "only an expense or income note takes a snapshot")
 	default:

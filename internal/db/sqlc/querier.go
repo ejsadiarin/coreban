@@ -17,6 +17,11 @@ type Querier interface {
 	ArchiveCard(ctx context.Context, id uuid.UUID) error
 	// Archives a note's card along with the note, unless it already is.
 	ArchiveLinkedCard(ctx context.Context, arg ArchiveLinkedCardParams) (int64, error)
+	// Gives a just-posted note its uploads, in the order the ids were given.
+	AttachToNote(ctx context.Context, arg AttachToNoteParams) (int64, error)
+	// Bytes the owner stores or is uploading: posted attachments (archived
+	// notes included), unposted uploads, and posters.
+	AttachmentUsage(ctx context.Context, ownerID uuid.UUID) (int64, error)
 	CardOnBoard(ctx context.Context, arg CardOnBoardParams) (uuid.UUID, error)
 	// The earliest reminder of an owner with a notification target whose
 	// moment has come, or (recurring) whose next occurrence was worked out in a
@@ -40,6 +45,8 @@ type Querier interface {
 	CreateLinkedNote(ctx context.Context, arg CreateLinkedNoteParams) error
 	// Every note statement is scoped by owner_id, so an owner can never read or
 	// change another owner's note.
+	// A plain note: text, attachments (counted here, attached by
+	// AttachToNote in the same transaction), or both.
 	CreateNote(ctx context.Context, arg CreateNoteParams) (Note, error)
 	// A note for an expense or income just captured from the Feed in
 	// corefinance, at the end of the feed. record_id is not checked: coreban
@@ -69,7 +76,8 @@ type Querier interface {
 	GetReminder(ctx context.Context, arg GetReminderParams) (GetReminderRow, error)
 	LabelOnBoard(ctx context.Context, arg LabelOnBoardParams) (uuid.UUID, error)
 	// Converts one of the owner's live plain notes in place: it keeps its place
-	// in the feed and drops its own text for the record's.
+	// in the feed and drops its own text for the record's. A note with
+	// attachments stays a plain note.
 	LinkNote(ctx context.Context, arg LinkNoteParams) (int64, error)
 	// Most recently archived first.
 	ListArchivedCards(ctx context.Context, boardID uuid.UUID) ([]ListArchivedCardsRow, error)
@@ -85,6 +93,8 @@ type Querier interface {
 	// Label statements take a board_id the caller has already resolved through
 	// an owner-scoped query (GetBoard), and are scoped by it.
 	ListLabels(ctx context.Context, boardID uuid.UUID) ([]ListLabelsRow, error)
+	// The attachments of the owner's notes among note_ids, in album order.
+	ListNoteAttachments(ctx context.Context, arg ListNoteAttachmentsParams) ([]Attachment, error)
 	// The owner's cards among ids, as their notes show them.
 	ListNoteCards(ctx context.Context, arg ListNoteCardsParams) ([]ListNoteCardsRow, error)
 	// The owner's reminders among ids, as their notes show them.
@@ -94,6 +104,12 @@ type Querier interface {
 	// more than it shows to learn whether an older page exists.
 	ListNotes(ctx context.Context, arg ListNotesParams) ([]Note, error)
 	ListOwnerReminders(ctx context.Context, arg ListOwnerRemindersParams) ([]ListOwnerRemindersRow, error)
+	// The owner's uploads among ids that no note has taken yet.
+	ListUploads(ctx context.Context, arg ListUploadsParams) ([]Attachment, error)
+	// Every attachment statement is scoped by owner_id.
+	// Serialises one owner's reservations, so two at once can't both fit
+	// under the quota.
+	LockAttachmentOwner(ctx context.Context, ownerID uuid.UUID) error
 	// Confirms the board is the owner's and serialises changes to its set of
 	// columns (the per-status invariant) for the rest of the transaction.
 	LockOwnedBoard(ctx context.Context, arg LockOwnedBoardParams) (uuid.UUID, error)
@@ -120,6 +136,7 @@ type Querier interface {
 	// in their current order. Only needed when repeated inserts between the
 	// same neighbours exhaust the gap between them.
 	RenumberColumn(ctx context.Context, arg RenumberColumnParams) error
+	ReserveAttachment(ctx context.Context, arg ReserveAttachmentParams) (Attachment, error)
 	// Back to the bottom of its column.
 	RestoreCard(ctx context.Context, id uuid.UUID) error
 	// Puts back an occurrence a send could not deliver yet, unless the owner
