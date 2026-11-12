@@ -66,7 +66,11 @@ _Avoid_: message, post, entry, chat item
 
 **Linked record**:
 The one reminder, card, expense, or income a note shows. The note keeps no content of its own: it shows the record as it is now, and editing the note edits the record.
-_Avoid_: attachment, reference, embed
+_Avoid_: reference, embed
+
+**Attachment**:
+An image or video posted with a plain note and kept with it: up to ten per note, fixed once posted, and gone only when the note is permanently deleted. Unlike a linked record, the note owns it.
+_Avoid_: media, file, upload, linked record
 
 **Budget record**:
 An expense or income in corefinance that a note links. coreban keeps only its id; the web reads it from corefinance, and saves what it last showed as the note's snapshot once the record is gone.
