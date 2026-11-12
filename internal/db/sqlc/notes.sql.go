@@ -62,7 +62,7 @@ const createNote = `-- name: CreateNote :one
 
 INSERT INTO notes (id, owner_id, body)
 VALUES ($1, $2, $3)
-RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card
+RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id
 `
 
 type CreateNoteParams struct {
@@ -89,6 +89,49 @@ func (q *Queries) CreateNote(ctx context.Context, arg CreateNoteParams) (Note, e
 		&i.CardID,
 		&i.Snapshot,
 		&i.ArchivedCard,
+		&i.RecordID,
+	)
+	return i, err
+}
+
+const createRecordNote = `-- name: CreateRecordNote :one
+INSERT INTO notes (id, owner_id, link_kind, record_id)
+VALUES ($1, $2, $3, $4)
+RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id
+`
+
+type CreateRecordNoteParams struct {
+	ID       uuid.UUID   `json:"id"`
+	OwnerID  uuid.UUID   `json:"owner_id"`
+	LinkKind pgtype.Text `json:"link_kind"`
+	RecordID pgtype.UUID `json:"record_id"`
+}
+
+// A note for an expense or income just captured from the Feed in
+// corefinance, at the end of the feed. record_id is not checked: coreban
+// can't call corefinance.
+func (q *Queries) CreateRecordNote(ctx context.Context, arg CreateRecordNoteParams) (Note, error) {
+	row := q.db.QueryRow(ctx, createRecordNote,
+		arg.ID,
+		arg.OwnerID,
+		arg.LinkKind,
+		arg.RecordID,
+	)
+	var i Note
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerID,
+		&i.Seq,
+		&i.Body,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LinkKind,
+		&i.ReminderID,
+		&i.CardID,
+		&i.Snapshot,
+		&i.ArchivedCard,
+		&i.RecordID,
 	)
 	return i, err
 }
@@ -128,7 +171,7 @@ func (q *Queries) DeleteNote(ctx context.Context, arg DeleteNoteParams) (int64, 
 }
 
 const getNoteForUpdate = `-- name: GetNoteForUpdate :one
-SELECT id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card
+SELECT id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id
 FROM notes
 WHERE id = $1 AND owner_id = $2
 FOR UPDATE
@@ -155,6 +198,7 @@ func (q *Queries) GetNoteForUpdate(ctx context.Context, arg GetNoteForUpdatePara
 		&i.CardID,
 		&i.Snapshot,
 		&i.ArchivedCard,
+		&i.RecordID,
 	)
 	return i, err
 }
@@ -315,7 +359,7 @@ func (q *Queries) ListNoteReminders(ctx context.Context, arg ListNoteRemindersPa
 }
 
 const listNotes = `-- name: ListNotes :many
-SELECT id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card
+SELECT id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id
 FROM notes
 WHERE owner_id = $1
   AND ($2::bigint IS NULL OR seq < $2::bigint)
@@ -354,6 +398,7 @@ func (q *Queries) ListNotes(ctx context.Context, arg ListNotesParams) ([]Note, e
 			&i.CardID,
 			&i.Snapshot,
 			&i.ArchivedCard,
+			&i.RecordID,
 		); err != nil {
 			return nil, err
 		}
@@ -365,11 +410,30 @@ func (q *Queries) ListNotes(ctx context.Context, arg ListNotesParams) ([]Note, e
 	return items, nil
 }
 
+const saveRecordSnapshot = `-- name: SaveRecordSnapshot :exec
+UPDATE notes
+SET snapshot = $3, updated_at = now()
+WHERE id = $1 AND owner_id = $2 AND record_id IS NOT NULL AND snapshot IS NULL
+`
+
+type SaveRecordSnapshotParams struct {
+	ID       uuid.UUID `json:"id"`
+	OwnerID  uuid.UUID `json:"owner_id"`
+	Snapshot []byte    `json:"snapshot"`
+}
+
+// Keeps what the web last showed of a cross-service record it found gone.
+// The first snapshot wins.
+func (q *Queries) SaveRecordSnapshot(ctx context.Context, arg SaveRecordSnapshotParams) error {
+	_, err := q.db.Exec(ctx, saveRecordSnapshot, arg.ID, arg.OwnerID, arg.Snapshot)
+	return err
+}
+
 const updateNote = `-- name: UpdateNote :one
 UPDATE notes
 SET body = $3, archived_at = $4, archived_card = $5, updated_at = now()
 WHERE id = $1 AND owner_id = $2
-RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card
+RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id
 `
 
 type UpdateNoteParams struct {
@@ -402,6 +466,7 @@ func (q *Queries) UpdateNote(ctx context.Context, arg UpdateNoteParams) (Note, e
 		&i.CardID,
 		&i.Snapshot,
 		&i.ArchivedCard,
+		&i.RecordID,
 	)
 	return i, err
 }

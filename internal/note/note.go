@@ -1,10 +1,11 @@
 // Package note serves an owner's feed: the notes they post to themselves,
 // newest last, like a chat with themselves. A note is plain text, or a
-// window onto one linked reminder or card, shown as it is now
-// (ADR-0003).
+// window onto one linked record, shown as it is now (ADR-0003): a
+// reminder or card here, or an expense or income in corefinance.
 package note
 
 import (
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -25,6 +26,13 @@ var (
 	// ErrLinked is returned when editing the text of a linked note, which
 	// has none of its own: its record is edited instead.
 	ErrLinked = errors.New("note shows a linked record")
+	// ErrRecordTaken is returned when linking a record that already has a
+	// note: a record has at most one.
+	ErrRecordTaken = errors.New("record already has a note")
+	// ErrTakesNoSnapshot is returned when the web offers a snapshot for a
+	// note whose snapshot coreban keeps itself (a reminder or card), or a
+	// plain note, which has none.
+	ErrTakesNoSnapshot = errors.New("note takes no snapshot from the web")
 )
 
 // MaxTextLength is the most characters a note's text may hold.
@@ -54,13 +62,20 @@ type Note struct {
 // Link is the one record a note shows: live while it exists, and its last
 // state (a snapshot) once it was deleted.
 type Link struct {
-	// Kind is "reminder" or "card".
+	// Kind is "reminder", "card", "expense", or "income".
 	Kind    string `json:"kind"`
 	Deleted bool   `json:"deleted"`
-	// Exactly one of these is set, for Kind; neither if a deleted record
-	// left no snapshot.
+	// RecordID names an expense or income in corefinance, which the web
+	// reads live itself; coreban only knows it is gone once the web saved
+	// a snapshot (Deleted).
+	RecordID *uuid.UUID `json:"record_id,omitempty"`
+	// At most one of these is set, for Kind: a reminder or card live or
+	// from its snapshot, an expense or income only from its snapshot.
+	// None if a deleted record left no snapshot.
 	Reminder *reminder.Reminder `json:"reminder,omitempty"`
 	Card     *Card              `json:"card,omitempty"`
+	Expense  json.RawMessage    `json:"expense,omitempty"`
+	Income   json.RawMessage    `json:"income,omitempty"`
 }
 
 // Card is a linked card as its note shows it: its title, the board and

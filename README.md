@@ -52,6 +52,13 @@ Kanban boards and ntfy reminders, served as a downstream service behind
   last state on the note, shown as deleted. Archiving the note archives its
   card or deletes its reminder; restoring brings back a card archived with
   it.
+- **Expense and income notes**: corefinance records link by kind and id,
+  unchecked (coreban has no credential to call corefinance). The web
+  creates the record in corefinance, then posts the note; it reads the
+  record live from corefinance, and saves the content it last showed as
+  the note's snapshot once it finds the record gone (first one wins).
+  Archiving such a note archives only the note: the web deletes the record
+  first.
 
 **Notification target and timezone**
 - Each owner sets their ntfy topic (always `coreban-…`, never a URL, one

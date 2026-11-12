@@ -283,7 +283,10 @@ DELETE {{host}}/api/coreban/reminders/PASTE_REMINDER_UUID_HERE
 # it is null once a page reaches the first note. A linked note has empty
 # "text" and a "link": {"kind": "reminder"|"card", "deleted": bool,
 # "reminder": {…} | "card": {id, board_id, board_name, column_name, status,
-# title, archived_at}}, live, or its last state once deleted.
+# title, archived_at}}, live, or its last state once deleted. An expense or
+# income note has "kind": "expense"|"income" and "record_id"; the web reads
+# the record from corefinance, and "expense"/"income" holds its snapshot
+# once the web found it gone ("deleted": true).
 
 ### The newest page of my Feed (default 50 notes, at most 200)
 
@@ -335,3 +338,24 @@ POST {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/cards
 Content-Type: application/json
 
 { "column_id": "PASTE_COLUMN_UUID_HERE", "title": "fix NAS backup", "note": "PASTE_NOTE_UUID_HERE" }
+
+### Link an expense just created in corefinance → 201 (already linked → 409)
+
+POST {{host}}/api/coreban/notes
+Content-Type: application/json
+
+{ "link": { "kind": "expense", "id": "PASTE_EXPENSE_UUID_HERE" } }
+
+### Save what the web last showed of a record it found gone (first one wins)
+
+PATCH {{host}}/api/coreban/notes/PASTE_NOTE_UUID_HERE
+Content-Type: application/json
+
+{ "snapshot": { "id": "PASTE_EXPENSE_UUID_HERE", "amount": 250, "description": "Lunch" } }
+
+### Archive an expense note after deleting the expense in corefinance
+
+PATCH {{host}}/api/coreban/notes/PASTE_NOTE_UUID_HERE
+Content-Type: application/json
+
+{ "archived": true, "snapshot": { "id": "PASTE_EXPENSE_UUID_HERE", "amount": 250, "description": "Lunch" } }

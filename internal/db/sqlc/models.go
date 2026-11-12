@@ -65,6 +65,7 @@ type Note struct {
 	CardID       pgtype.UUID        `json:"card_id"`
 	Snapshot     []byte             `json:"snapshot"`
 	ArchivedCard bool               `json:"archived_card"`
+	RecordID     pgtype.UUID        `json:"record_id"`
 }
 
 type NoteCard struct {

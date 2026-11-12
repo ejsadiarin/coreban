@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -44,6 +45,27 @@ func (s *Store) Post(ctx context.Context, owner uuid.UUID, text string) (Note, e
 	return s.one(ctx, owner, row)
 }
 
+// PostRecord adds a note to the end of the owner's feed showing the
+// expense or income (feedlink.CrossService) the web just created in
+// corefinance. coreban can't check recordID; a record already linked to
+// one of the owner's notes is refused (ErrRecordTaken).
+func (s *Store) PostRecord(ctx context.Context, owner uuid.UUID, kind string, recordID uuid.UUID) (Note, error) {
+	row, err := s.queries().CreateRecordNote(ctx, dbgen.CreateRecordNoteParams{
+		ID: uuid.New(), OwnerID: owner,
+		LinkKind: pgtype.Text{String: kind, Valid: true}, RecordID: pgtype.UUID{Bytes: recordID, Valid: true},
+	})
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation && pgErr.ConstraintName == "notes_record_key" {
+		return Note{}, ErrRecordTaken
+	}
+	if err != nil {
+		return Note{}, err
+	}
+	return s.one(ctx, owner, row)
+}
+
+const uniqueViolation = "23505"
+
 // Feed returns one page of the owner's feed: the newest size notes posted
 // before the cursor (or the newest of all, with none), oldest first.
 func (s *Store) Feed(ctx context.Context, owner uuid.UUID, before *Cursor, size int) (Page, error) {
@@ -73,6 +95,9 @@ type Edit struct {
 	// Text must already be clean (CleanText).
 	Text     *string
 	Archived *bool
+	// Snapshot is what the web last showed of an expense or income it
+	// found gone: a JSON object, kept only if the note has none yet.
+	Snapshot json.RawMessage
 }
 
 // Edit applies e to one of the owner's notes. Archiving or restoring
@@ -83,6 +108,9 @@ type Edit struct {
 // Archiving a linked note archives its card, or deletes its reminder for
 // good, in the same transaction. Restoring brings back a card that was
 // archived along with the note; a deleted reminder stays deleted.
+// Archiving an expense or income note changes only the note: the web has
+// deleted the record in corefinance first (ADR-0003), and sends the
+// content it last showed as the snapshot.
 func (s *Store) Edit(ctx context.Context, owner, id uuid.UUID, e Edit) (Note, error) {
 	var row dbgen.Note
 	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
@@ -107,6 +135,16 @@ func (s *Store) Edit(ctx context.Context, owner, id uuid.UUID, e Edit) (Note, er
 					}
 				}
 				archivedCard = false
+			}
+		}
+		if e.Snapshot != nil {
+			if !cur.RecordID.Valid {
+				return ErrTakesNoSnapshot
+			}
+			if err := q.SaveRecordSnapshot(ctx, dbgen.SaveRecordSnapshotParams{
+				ID: id, OwnerID: owner, Snapshot: e.Snapshot,
+			}); err != nil {
+				return fmt.Errorf("save snapshot: %w", err)
 			}
 		}
 		body := cur.Body
@@ -247,6 +285,15 @@ func (s *Store) render(ctx context.Context, owner uuid.UUID, rows []dbgen.Note) 
 				l.Deleted = !r.ReminderID.Valid
 				if j, ok := reminderAt[i]; ok {
 					l.Reminder = &reminders[j]
+				}
+			case feedlink.KindExpense, feedlink.KindIncome:
+				id := uuid.UUID(r.RecordID.Bytes)
+				l.RecordID = &id
+				l.Deleted = r.Snapshot != nil
+				if l.Kind == feedlink.KindExpense {
+					l.Expense = r.Snapshot
+				} else {
+					l.Income = r.Snapshot
 				}
 			case feedlink.KindCard:
 				l.Deleted = !r.CardID.Valid

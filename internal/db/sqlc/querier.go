@@ -41,6 +41,10 @@ type Querier interface {
 	// Every note statement is scoped by owner_id, so an owner can never read or
 	// change another owner's note.
 	CreateNote(ctx context.Context, arg CreateNoteParams) (Note, error)
+	// A note for an expense or income just captured from the Feed in
+	// corefinance, at the end of the feed. record_id is not checked: coreban
+	// can't call corefinance.
+	CreateRecordNote(ctx context.Context, arg CreateRecordNoteParams) (Note, error)
 	CreateReminder(ctx context.Context, arg CreateReminderParams) error
 	DeleteBoard(ctx context.Context, arg DeleteBoardParams) (int64, error)
 	DeleteCard(ctx context.Context, arg DeleteCardParams) (int64, error)
@@ -121,6 +125,9 @@ type Querier interface {
 	// Puts back an occurrence a send could not deliver yet, unless the owner
 	// has rescheduled the reminder since it was claimed.
 	RestoreReminder(ctx context.Context, arg RestoreReminderParams) error
+	// Keeps what the web last showed of a cross-service record it found gone.
+	// The first snapshot wins.
+	SaveRecordSnapshot(ctx context.Context, arg SaveRecordSnapshotParams) error
 	SetColumnPosition(ctx context.Context, arg SetColumnPositionParams) error
 	// set_due replaces the due (both fields; NULLs clear it), else it's kept.
 	UpdateCard(ctx context.Context, arg UpdateCardParams) (int64, error)

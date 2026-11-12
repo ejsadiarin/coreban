@@ -1,6 +1,7 @@
 package note
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/ejsadiarin/coreban/internal/feedlink"
 	"github.com/ejsadiarin/coreban/internal/helper"
 )
 
@@ -64,8 +66,17 @@ func (h *Handler) feed(w http.ResponseWriter, r *http.Request) {
 	helper.RespondJSON(w, http.StatusOK, p)
 }
 
+// postRequest posts plain text, or links an expense or income the web
+// just created in corefinance. Reminders and cards get their note when
+// they are created ("note": "new").
 type postRequest struct {
-	Text string `json:"text"`
+	Text string       `json:"text"`
+	Link *linkRequest `json:"link"`
+}
+
+type linkRequest struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
 }
 
 func (h *Handler) post(w http.ResponseWriter, r *http.Request) {
@@ -75,6 +86,10 @@ func (h *Handler) post(w http.ResponseWriter, r *http.Request) {
 	}
 	var req postRequest
 	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.Link != nil {
+		h.postRecord(w, r, owner, req)
 		return
 	}
 	text, err := CleanText(req.Text)
@@ -90,9 +105,31 @@ func (h *Handler) post(w http.ResponseWriter, r *http.Request) {
 	helper.RespondJSON(w, http.StatusCreated, n)
 }
 
+func (h *Handler) postRecord(w http.ResponseWriter, r *http.Request, owner uuid.UUID, req postRequest) {
+	if req.Text != "" {
+		helper.RespondErrorJSON(w, http.StatusBadRequest, "a note has text or a link, not both")
+		return
+	}
+	if !feedlink.CrossService(req.Link.Kind) {
+		helper.RespondErrorJSON(w, http.StatusBadRequest,
+			`link kind must be "expense" or "income"; reminders and cards get their note as they are created`)
+		return
+	}
+	id, err := uuid.Parse(req.Link.ID)
+	if err != nil {
+		helper.RespondErrorJSON(w, http.StatusBadRequest, "link id must be the record's id")
+		return
+	}
+	n, err := h.Store.PostRecord(r.Context(), owner, req.Link.Kind, id)
+	if !respondStoreError(w, err, "failed to post note") {
+		helper.RespondJSON(w, http.StatusCreated, n)
+	}
+}
+
 type editRequest struct {
-	Text     *string `json:"text"`
-	Archived *bool   `json:"archived"`
+	Text     *string         `json:"text"`
+	Archived *bool           `json:"archived"`
+	Snapshot json.RawMessage `json:"snapshot"`
 }
 
 func (h *Handler) edit(w http.ResponseWriter, r *http.Request) {
@@ -109,6 +146,13 @@ func (h *Handler) edit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e := Edit{Archived: req.Archived}
+	if req.Snapshot != nil {
+		if s := bytes.TrimSpace(req.Snapshot); len(s) == 0 || s[0] != '{' {
+			helper.RespondErrorJSON(w, http.StatusBadRequest, "snapshot must be the record as a JSON object")
+			return
+		}
+		e.Snapshot = req.Snapshot
+	}
 	if req.Text != nil {
 		text, err := CleanText(*req.Text)
 		if err != nil {
@@ -169,6 +213,10 @@ func respondStoreError(w http.ResponseWriter, err error, msg string) bool {
 		helper.RespondErrorJSON(w, http.StatusConflict, "the note is archived; restore it first")
 	case errors.Is(err, ErrLinked):
 		helper.RespondErrorJSON(w, http.StatusConflict, "the note shows a linked record; edit the record instead")
+	case errors.Is(err, ErrRecordTaken):
+		helper.RespondErrorJSON(w, http.StatusConflict, "that record already has a note")
+	case errors.Is(err, ErrTakesNoSnapshot):
+		helper.RespondErrorJSON(w, http.StatusConflict, "only an expense or income note takes a snapshot")
 	default:
 		helper.RespondErrorJSON(w, http.StatusInternalServerError, msg)
 	}

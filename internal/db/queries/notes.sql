@@ -71,3 +71,18 @@ WHERE k.id = $1 AND k.archived_at IS NULL AND b.id = k.board_id AND b.owner_id =
 -- Deletes a note's reminder as the note is archived; the snapshot trigger
 -- keeps its last state on the note.
 DELETE FROM reminders WHERE id = $1 AND owner_id = $2;
+
+-- name: CreateRecordNote :one
+-- A note for an expense or income just captured from the Feed in
+-- corefinance, at the end of the feed. record_id is not checked: coreban
+-- can't call corefinance.
+INSERT INTO notes (id, owner_id, link_kind, record_id)
+VALUES ($1, $2, $3, $4)
+RETURNING *;
+
+-- name: SaveRecordSnapshot :exec
+-- Keeps what the web last showed of a cross-service record it found gone.
+-- The first snapshot wins.
+UPDATE notes
+SET snapshot = $3, updated_at = now()
+WHERE id = $1 AND owner_id = $2 AND record_id IS NOT NULL AND snapshot IS NULL;

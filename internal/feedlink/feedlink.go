@@ -13,11 +13,18 @@ import (
 	dbgen "github.com/ejsadiarin/coreban/internal/db/sqlc"
 )
 
-// Kinds of record a note may link.
+// Kinds of record a note may link. Expenses and incomes live in
+// corefinance, so their notes are made by the note package (on the web's
+// word that it created the record), never by Link.
 const (
 	KindReminder = "reminder"
 	KindCard     = "card"
+	KindExpense  = "expense"
+	KindIncome   = "income"
 )
+
+// CrossService reports whether kind's records live in another service.
+func CrossService(kind string) bool { return kind == KindExpense || kind == KindIncome }
 
 // ErrNotLinkable is returned for a note that can't take a record: it
 // isn't one of the owner's live plain notes.

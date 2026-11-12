@@ -68,6 +68,10 @@ _Avoid_: message, post, entry, chat item
 The one reminder, card, expense, or income a note shows. The note keeps no content of its own: it shows the record as it is now, and editing the note edits the record.
 _Avoid_: attachment, reference, embed
 
+**Budget record**:
+An expense or income in corefinance that a note links. coreban keeps only its id; the web reads it from corefinance, and saves what it last showed as the note's snapshot once the record is gone.
+_Avoid_: transaction, entry, finance item
+
 **Feed**:
 An owner's notes in the order they were posted, newest last, like a chat with themselves.
 _Avoid_: chat, inbox, timeline, stream
