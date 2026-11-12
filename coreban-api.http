@@ -280,7 +280,10 @@ DELETE {{host}}/api/coreban/reminders/PASTE_REMINDER_UUID_HERE
 
 # ─── Feed ──────────────────────────────────────────────────────────────────
 # Notes come back oldest first. "older" is the cursor for the page before;
-# it is null once a page reaches the first note.
+# it is null once a page reaches the first note. A linked note has empty
+# "text" and a "link": {"kind": "reminder"|"card", "deleted": bool,
+# "reminder": {…} | "card": {id, board_id, board_name, column_name, status,
+# title, archived_at}}, live, or its last state once deleted.
 
 ### The newest page of my Feed (default 50 notes, at most 200)
 
@@ -314,3 +317,21 @@ Content-Type: application/json
 ### Permanently delete a note → 204
 
 DELETE {{host}}/api/coreban/notes/PASTE_NOTE_UUID_HERE
+
+### Capture a reminder from the Feed: it gets a linked note at the end
+
+POST {{host}}/api/coreban/reminders
+Content-Type: application/json
+
+{
+  "message": "call dentist",
+  "schedule": { "kind": "once", "at": "2026-12-01T07:00" },
+  "note": "new"
+}
+
+### Make a card from a plain note: the note links it in place
+
+POST {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/cards
+Content-Type: application/json
+
+{ "column_id": "PASTE_COLUMN_UUID_HERE", "title": "fix NAS backup", "note": "PASTE_NOTE_UUID_HERE" }

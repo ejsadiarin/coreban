@@ -167,6 +167,8 @@ func respondStoreError(w http.ResponseWriter, err error, msg string) bool {
 		helper.RespondErrorJSON(w, http.StatusNotFound, "note not found")
 	case errors.Is(err, ErrArchived):
 		helper.RespondErrorJSON(w, http.StatusConflict, "the note is archived; restore it first")
+	case errors.Is(err, ErrLinked):
+		helper.RespondErrorJSON(w, http.StatusConflict, "the note shows a linked record; edit the record instead")
 	default:
 		helper.RespondErrorJSON(w, http.StatusInternalServerError, msg)
 	}

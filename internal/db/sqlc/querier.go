@@ -15,6 +15,8 @@ type Querier interface {
 	AdvanceReminder(ctx context.Context, arg AdvanceReminderParams) error
 	ApplyLabel(ctx context.Context, arg ApplyLabelParams) error
 	ArchiveCard(ctx context.Context, id uuid.UUID) error
+	// Archives a note's card along with the note, unless it already is.
+	ArchiveLinkedCard(ctx context.Context, arg ArchiveLinkedCardParams) (int64, error)
 	CardOnBoard(ctx context.Context, arg CardOnBoardParams) (uuid.UUID, error)
 	// The earliest reminder of an owner with a notification target whose
 	// moment has come, or (recurring) whose next occurrence was worked out in a
@@ -34,6 +36,8 @@ type Querier interface {
 	CreateCard(ctx context.Context, arg CreateCardParams) error
 	CreateColumn(ctx context.Context, arg CreateColumnParams) error
 	CreateLabel(ctx context.Context, arg CreateLabelParams) error
+	// A note for a record just captured from the Feed, at the end of the feed.
+	CreateLinkedNote(ctx context.Context, arg CreateLinkedNoteParams) error
 	// Every note statement is scoped by owner_id, so an owner can never read or
 	// change another owner's note.
 	CreateNote(ctx context.Context, arg CreateNoteParams) (Note, error)
@@ -42,6 +46,9 @@ type Querier interface {
 	DeleteCard(ctx context.Context, arg DeleteCardParams) (int64, error)
 	DeleteColumn(ctx context.Context, arg DeleteColumnParams) error
 	DeleteLabel(ctx context.Context, arg DeleteLabelParams) (int64, error)
+	// Deletes a note's reminder as the note is archived; the snapshot trigger
+	// keeps its last state on the note.
+	DeleteLinkedReminder(ctx context.Context, arg DeleteLinkedReminderParams) error
 	DeleteNote(ctx context.Context, arg DeleteNoteParams) (int64, error)
 	DeleteReminder(ctx context.Context, arg DeleteReminderParams) (int64, error)
 	// When the dispatcher next has something to send.
@@ -57,6 +64,9 @@ type Querier interface {
 	GetOwnerSettings(ctx context.Context, ownerID uuid.UUID) (GetOwnerSettingsRow, error)
 	GetReminder(ctx context.Context, arg GetReminderParams) (GetReminderRow, error)
 	LabelOnBoard(ctx context.Context, arg LabelOnBoardParams) (uuid.UUID, error)
+	// Converts one of the owner's live plain notes in place: it keeps its place
+	// in the feed and drops its own text for the record's.
+	LinkNote(ctx context.Context, arg LinkNoteParams) (int64, error)
 	// Most recently archived first.
 	ListArchivedCards(ctx context.Context, boardID uuid.UUID) ([]ListArchivedCardsRow, error)
 	// Every card's labels on the board, each card's by name.
@@ -71,6 +81,10 @@ type Querier interface {
 	// Label statements take a board_id the caller has already resolved through
 	// an owner-scoped query (GetBoard), and are scoped by it.
 	ListLabels(ctx context.Context, boardID uuid.UUID) ([]ListLabelsRow, error)
+	// The owner's cards among ids, as their notes show them.
+	ListNoteCards(ctx context.Context, arg ListNoteCardsParams) ([]ListNoteCardsRow, error)
+	// The owner's reminders among ids, as their notes show them.
+	ListNoteReminders(ctx context.Context, arg ListNoteRemindersParams) ([]ListNoteRemindersRow, error)
 	// One page of the feed going back in time: the newest notes older than
 	// the cursor (seq below before_seq), newest first. The caller asks for one
 	// more than it shows to learn whether an older page exists.

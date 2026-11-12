@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	dbgen "github.com/ejsadiarin/coreban/internal/db/sqlc"
+	"github.com/ejsadiarin/coreban/internal/feedlink"
 )
 
 // ErrCardNotFound is returned when a card does not exist on the owner's
@@ -60,8 +61,9 @@ func lockColumn(ctx context.Context, q *dbgen.Queries, owner, boardID, column uu
 }
 
 // CreateCard adds a card with a title at the bottom of a column on one of
-// the owner's boards.
-func (s *Store) CreateCard(ctx context.Context, owner, boardID, column uuid.UUID, title string) (Card, error) {
+// the owner's boards. With link, the card gets its note in the Feed in
+// the same transaction.
+func (s *Store) CreateCard(ctx context.Context, owner, boardID, column uuid.UUID, title string, link *feedlink.Target) (Card, error) {
 	var c Card
 	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
 		q := dbgen.New(tx)
@@ -71,6 +73,11 @@ func (s *Store) CreateCard(ctx context.Context, owner, boardID, column uuid.UUID
 		id := uuid.New()
 		if err := q.CreateCard(ctx, dbgen.CreateCardParams{ID: id, BoardID: boardID, ColumnID: column, Title: title}); err != nil {
 			return fmt.Errorf("insert card: %w", err)
+		}
+		if link != nil {
+			if err := feedlink.Link(ctx, q, owner, *link, feedlink.Record{Kind: feedlink.KindCard, ID: id}); err != nil {
+				return err
+			}
 		}
 		var err error
 		c, err = readCard(ctx, q, owner, boardID, id)

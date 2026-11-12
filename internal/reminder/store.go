@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	dbgen "github.com/ejsadiarin/coreban/internal/db/sqlc"
+	"github.com/ejsadiarin/coreban/internal/feedlink"
 )
 
 // Store persists reminders through internal/db/queries/reminders.sql. Every
@@ -152,8 +153,9 @@ func (s *Store) ownedCard(ctx context.Context, owner, id uuid.UUID) (card, error
 }
 
 // Create adds a reminder, attached to cardID if set, unless the owner
-// already has limit of them.
-func (s *Store) Create(ctx context.Context, owner uuid.UUID, message string, sched Schedule, cardID *uuid.UUID, v view, limit int) (uuid.UUID, error) {
+// already has limit of them. With link, the reminder gets its note in the
+// Feed in the same transaction.
+func (s *Store) Create(ctx context.Context, owner uuid.UUID, message string, sched Schedule, cardID *uuid.UUID, link *feedlink.Target, v view, limit int) (uuid.UUID, error) {
 	id := uuid.New()
 	row := rowOf(sched, v)
 	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
@@ -174,7 +176,14 @@ func (s *Store) Create(ctx context.Context, owner uuid.UUID, message string, sch
 		}); err != nil {
 			return fmt.Errorf("insert reminder: %w", err)
 		}
-		return nil
+		if link == nil {
+			return nil
+		}
+		err = feedlink.Link(ctx, q, owner, *link, feedlink.Record{Kind: feedlink.KindReminder, ID: id})
+		if errors.Is(err, feedlink.ErrNotLinkable) {
+			return errInvalid(err.Error())
+		}
+		return err
 	})
 	return id, err
 }

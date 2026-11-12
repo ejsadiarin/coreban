@@ -53,13 +53,51 @@ type Label struct {
 }
 
 type Note struct {
-	ID         uuid.UUID          `json:"id"`
+	ID           uuid.UUID          `json:"id"`
+	OwnerID      uuid.UUID          `json:"owner_id"`
+	Seq          int64              `json:"seq"`
+	Body         pgtype.Text        `json:"body"`
+	ArchivedAt   pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	LinkKind     pgtype.Text        `json:"link_kind"`
+	ReminderID   pgtype.UUID        `json:"reminder_id"`
+	CardID       pgtype.UUID        `json:"card_id"`
+	Snapshot     []byte             `json:"snapshot"`
+	ArchivedCard bool               `json:"archived_card"`
+}
+
+type NoteCard struct {
 	OwnerID    uuid.UUID          `json:"owner_id"`
-	Seq        int64              `json:"seq"`
-	Body       string             `json:"body"`
+	ID         uuid.UUID          `json:"id"`
+	BoardID    uuid.UUID          `json:"board_id"`
+	BoardName  string             `json:"board_name"`
+	ColumnID   uuid.UUID          `json:"column_id"`
+	ColumnName string             `json:"column_name"`
+	Status     string             `json:"status"`
+	Title      string             `json:"title"`
 	ArchivedAt pgtype.Timestamptz `json:"archived_at"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+type NoteReminder struct {
+	OwnerID           uuid.UUID          `json:"owner_id"`
+	ID                uuid.UUID          `json:"id"`
+	Message           string             `json:"message"`
+	StartsAt          pgtype.Timestamptz `json:"starts_at"`
+	Rrule             pgtype.Text        `json:"rrule"`
+	LocalStart        pgtype.Timestamp   `json:"local_start"`
+	NextFireAt        pgtype.Timestamptz `json:"next_fire_at"`
+	NextTz            pgtype.Text        `json:"next_tz"`
+	LastDeliveryAt    pgtype.Timestamptz `json:"last_delivery_at"`
+	LastDeliveryLate  bool               `json:"last_delivery_late"`
+	LastDeliveryError pgtype.Text        `json:"last_delivery_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	CardID            pgtype.UUID        `json:"card_id"`
+	CardBoardID       pgtype.UUID        `json:"card_board_id"`
+	CardTitle         pgtype.Text        `json:"card_title"`
+	CardCompleted     bool               `json:"card_completed"`
+	CardArchived      bool               `json:"card_archived"`
 }
 
 type OwnerSetting struct {

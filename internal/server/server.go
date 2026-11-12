@@ -32,17 +32,20 @@ func New(pool *pgxpool.Pool, authenticate func(http.Handler) http.Handler) *Serv
 		panic("server: authenticate middleware is required")
 	}
 	settingsStore := &settings.Store{Pool: pool}
+	reminders := &reminder.Handler{
+		Store:    &reminder.Store{Pool: pool},
+		Settings: settingsStore,
+		Cap:      reminder.DefaultCap,
+		Now:      time.Now,
+	}
 	return &Server{
 		Pool:         pool,
 		authenticate: authenticate,
 		Boards:       &board.Handler{Store: &board.Store{Pool: pool}, Settings: settingsStore},
 		Settings:     &settings.Handler{Store: settingsStore},
-		Reminders: &reminder.Handler{
-			Store:    &reminder.Store{Pool: pool},
-			Settings: settingsStore,
-			Cap:      reminder.DefaultCap,
-			Now:      time.Now,
-		},
-		Notes: &note.Handler{Store: &note.Store{Pool: pool}},
+		Reminders:    reminders,
+		// Linked reminders render as the Reminders page shows them, with
+		// the same clock and cap the server is given.
+		Notes: &note.Handler{Store: &note.Store{Pool: pool, Reminders: reminders.Render}},
 	}
 }

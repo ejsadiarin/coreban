@@ -12,6 +12,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	dbgen "github.com/ejsadiarin/coreban/internal/db/sqlc"
+	"github.com/ejsadiarin/coreban/internal/feedlink"
 	"github.com/ejsadiarin/coreban/internal/helper"
 	"github.com/ejsadiarin/coreban/internal/settings"
 )
@@ -157,6 +159,9 @@ type createRequest struct {
 	Message  string          `json:"message"`
 	Schedule scheduleRequest `json:"schedule"`
 	CardID   *string         `json:"card_id"`
+	// Note, when set, gives the reminder a note in the Feed: "new" adds
+	// one, a plain note's id converts that note (ADR-0003).
+	Note *string `json:"note"`
 }
 
 // cardOf resolves a requested card_id to one of the owner's cards.
@@ -189,6 +194,11 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) {
 		return
 	}
+	link, err := feedlink.Parse(req.Note)
+	if err != nil {
+		helper.RespondErrorJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	v, err := h.ownerView(r.Context(), owner)
 	if h.respondError(w, err, "failed to create reminder") {
 		return
@@ -213,7 +223,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	if h.respondError(w, err, "") {
 		return
 	}
-	id, err := h.Store.Create(r.Context(), owner, msg, sched, cardID, v, h.Cap)
+	id, err := h.Store.Create(r.Context(), owner, msg, sched, cardID, link, v, h.Cap)
 	if h.respondError(w, err, "failed to create reminder") {
 		return
 	}
@@ -295,6 +305,22 @@ func (h *Handler) edit(w http.ResponseWriter, r *http.Request) {
 		h.changed()
 	}
 	h.respondReminder(w, r, owner, id, http.StatusOK, "failed to fetch reminder")
+}
+
+// Render shows reminder rows (as the Feed reads them, live or from a
+// note's snapshot) the way the owner sees their reminders now.
+func (h *Handler) Render(ctx context.Context, owner uuid.UUID, rows []dbgen.GetReminderRow) ([]Reminder, error) {
+	v, err := h.ownerView(ctx, owner)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Reminder, len(rows))
+	for i, r := range rows {
+		if out[i], err = fromRow(r, v); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func (h *Handler) remove(w http.ResponseWriter, r *http.Request) {

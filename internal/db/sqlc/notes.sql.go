@@ -12,17 +12,63 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const archiveLinkedCard = `-- name: ArchiveLinkedCard :execrows
+UPDATE cards k
+SET archived_at = now(), updated_at = now()
+FROM boards b
+WHERE k.id = $1 AND k.archived_at IS NULL AND b.id = k.board_id AND b.owner_id = $2
+`
+
+type ArchiveLinkedCardParams struct {
+	ID      uuid.UUID `json:"id"`
+	OwnerID uuid.UUID `json:"owner_id"`
+}
+
+// Archives a note's card along with the note, unless it already is.
+func (q *Queries) ArchiveLinkedCard(ctx context.Context, arg ArchiveLinkedCardParams) (int64, error) {
+	result, err := q.db.Exec(ctx, archiveLinkedCard, arg.ID, arg.OwnerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const createLinkedNote = `-- name: CreateLinkedNote :exec
+INSERT INTO notes (id, owner_id, link_kind, reminder_id, card_id)
+VALUES ($1, $2, $3, $4, $5)
+`
+
+type CreateLinkedNoteParams struct {
+	ID         uuid.UUID   `json:"id"`
+	OwnerID    uuid.UUID   `json:"owner_id"`
+	LinkKind   pgtype.Text `json:"link_kind"`
+	ReminderID pgtype.UUID `json:"reminder_id"`
+	CardID     pgtype.UUID `json:"card_id"`
+}
+
+// A note for a record just captured from the Feed, at the end of the feed.
+func (q *Queries) CreateLinkedNote(ctx context.Context, arg CreateLinkedNoteParams) error {
+	_, err := q.db.Exec(ctx, createLinkedNote,
+		arg.ID,
+		arg.OwnerID,
+		arg.LinkKind,
+		arg.ReminderID,
+		arg.CardID,
+	)
+	return err
+}
+
 const createNote = `-- name: CreateNote :one
 
 INSERT INTO notes (id, owner_id, body)
 VALUES ($1, $2, $3)
-RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at
+RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card
 `
 
 type CreateNoteParams struct {
-	ID      uuid.UUID `json:"id"`
-	OwnerID uuid.UUID `json:"owner_id"`
-	Body    string    `json:"body"`
+	ID      uuid.UUID   `json:"id"`
+	OwnerID uuid.UUID   `json:"owner_id"`
+	Body    pgtype.Text `json:"body"`
 }
 
 // Every note statement is scoped by owner_id, so an owner can never read or
@@ -38,8 +84,29 @@ func (q *Queries) CreateNote(ctx context.Context, arg CreateNoteParams) (Note, e
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LinkKind,
+		&i.ReminderID,
+		&i.CardID,
+		&i.Snapshot,
+		&i.ArchivedCard,
 	)
 	return i, err
+}
+
+const deleteLinkedReminder = `-- name: DeleteLinkedReminder :exec
+DELETE FROM reminders WHERE id = $1 AND owner_id = $2
+`
+
+type DeleteLinkedReminderParams struct {
+	ID      uuid.UUID `json:"id"`
+	OwnerID uuid.UUID `json:"owner_id"`
+}
+
+// Deletes a note's reminder as the note is archived; the snapshot trigger
+// keeps its last state on the note.
+func (q *Queries) DeleteLinkedReminder(ctx context.Context, arg DeleteLinkedReminderParams) error {
+	_, err := q.db.Exec(ctx, deleteLinkedReminder, arg.ID, arg.OwnerID)
+	return err
 }
 
 const deleteNote = `-- name: DeleteNote :execrows
@@ -61,7 +128,7 @@ func (q *Queries) DeleteNote(ctx context.Context, arg DeleteNoteParams) (int64, 
 }
 
 const getNoteForUpdate = `-- name: GetNoteForUpdate :one
-SELECT id, owner_id, seq, body, archived_at, created_at, updated_at
+SELECT id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card
 FROM notes
 WHERE id = $1 AND owner_id = $2
 FOR UPDATE
@@ -83,12 +150,172 @@ func (q *Queries) GetNoteForUpdate(ctx context.Context, arg GetNoteForUpdatePara
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LinkKind,
+		&i.ReminderID,
+		&i.CardID,
+		&i.Snapshot,
+		&i.ArchivedCard,
 	)
 	return i, err
 }
 
+const linkNote = `-- name: LinkNote :execrows
+UPDATE notes
+SET body = NULL, link_kind = $3, reminder_id = $4, card_id = $5, updated_at = now()
+WHERE id = $1 AND owner_id = $2 AND link_kind IS NULL AND archived_at IS NULL
+`
+
+type LinkNoteParams struct {
+	ID         uuid.UUID   `json:"id"`
+	OwnerID    uuid.UUID   `json:"owner_id"`
+	LinkKind   pgtype.Text `json:"link_kind"`
+	ReminderID pgtype.UUID `json:"reminder_id"`
+	CardID     pgtype.UUID `json:"card_id"`
+}
+
+// Converts one of the owner's live plain notes in place: it keeps its place
+// in the feed and drops its own text for the record's.
+func (q *Queries) LinkNote(ctx context.Context, arg LinkNoteParams) (int64, error) {
+	result, err := q.db.Exec(ctx, linkNote,
+		arg.ID,
+		arg.OwnerID,
+		arg.LinkKind,
+		arg.ReminderID,
+		arg.CardID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const listNoteCards = `-- name: ListNoteCards :many
+SELECT id, board_id, board_name, column_id, column_name, status, title, archived_at
+FROM note_cards
+WHERE owner_id = $1 AND id = ANY($2::uuid[])
+`
+
+type ListNoteCardsParams struct {
+	OwnerID uuid.UUID   `json:"owner_id"`
+	Ids     []uuid.UUID `json:"ids"`
+}
+
+type ListNoteCardsRow struct {
+	ID         uuid.UUID          `json:"id"`
+	BoardID    uuid.UUID          `json:"board_id"`
+	BoardName  string             `json:"board_name"`
+	ColumnID   uuid.UUID          `json:"column_id"`
+	ColumnName string             `json:"column_name"`
+	Status     string             `json:"status"`
+	Title      string             `json:"title"`
+	ArchivedAt pgtype.Timestamptz `json:"archived_at"`
+}
+
+// The owner's cards among ids, as their notes show them.
+func (q *Queries) ListNoteCards(ctx context.Context, arg ListNoteCardsParams) ([]ListNoteCardsRow, error) {
+	rows, err := q.db.Query(ctx, listNoteCards, arg.OwnerID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNoteCardsRow{}
+	for rows.Next() {
+		var i ListNoteCardsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BoardID,
+			&i.BoardName,
+			&i.ColumnID,
+			&i.ColumnName,
+			&i.Status,
+			&i.Title,
+			&i.ArchivedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNoteReminders = `-- name: ListNoteReminders :many
+SELECT id, message, starts_at, rrule, local_start, next_fire_at, next_tz,
+       last_delivery_at, last_delivery_late, last_delivery_error,
+       created_at, updated_at,
+       card_id, card_board_id, card_title, card_completed, card_archived
+FROM note_reminders
+WHERE owner_id = $1 AND id = ANY($2::uuid[])
+`
+
+type ListNoteRemindersParams struct {
+	OwnerID uuid.UUID   `json:"owner_id"`
+	Ids     []uuid.UUID `json:"ids"`
+}
+
+type ListNoteRemindersRow struct {
+	ID                uuid.UUID          `json:"id"`
+	Message           string             `json:"message"`
+	StartsAt          pgtype.Timestamptz `json:"starts_at"`
+	Rrule             pgtype.Text        `json:"rrule"`
+	LocalStart        pgtype.Timestamp   `json:"local_start"`
+	NextFireAt        pgtype.Timestamptz `json:"next_fire_at"`
+	NextTz            pgtype.Text        `json:"next_tz"`
+	LastDeliveryAt    pgtype.Timestamptz `json:"last_delivery_at"`
+	LastDeliveryLate  bool               `json:"last_delivery_late"`
+	LastDeliveryError pgtype.Text        `json:"last_delivery_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	CardID            pgtype.UUID        `json:"card_id"`
+	CardBoardID       pgtype.UUID        `json:"card_board_id"`
+	CardTitle         pgtype.Text        `json:"card_title"`
+	CardCompleted     bool               `json:"card_completed"`
+	CardArchived      bool               `json:"card_archived"`
+}
+
+// The owner's reminders among ids, as their notes show them.
+func (q *Queries) ListNoteReminders(ctx context.Context, arg ListNoteRemindersParams) ([]ListNoteRemindersRow, error) {
+	rows, err := q.db.Query(ctx, listNoteReminders, arg.OwnerID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNoteRemindersRow{}
+	for rows.Next() {
+		var i ListNoteRemindersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Message,
+			&i.StartsAt,
+			&i.Rrule,
+			&i.LocalStart,
+			&i.NextFireAt,
+			&i.NextTz,
+			&i.LastDeliveryAt,
+			&i.LastDeliveryLate,
+			&i.LastDeliveryError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CardID,
+			&i.CardBoardID,
+			&i.CardTitle,
+			&i.CardCompleted,
+			&i.CardArchived,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNotes = `-- name: ListNotes :many
-SELECT id, owner_id, seq, body, archived_at, created_at, updated_at
+SELECT id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card
 FROM notes
 WHERE owner_id = $1
   AND ($2::bigint IS NULL OR seq < $2::bigint)
@@ -122,6 +349,11 @@ func (q *Queries) ListNotes(ctx context.Context, arg ListNotesParams) ([]Note, e
 			&i.ArchivedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LinkKind,
+			&i.ReminderID,
+			&i.CardID,
+			&i.Snapshot,
+			&i.ArchivedCard,
 		); err != nil {
 			return nil, err
 		}
@@ -135,16 +367,17 @@ func (q *Queries) ListNotes(ctx context.Context, arg ListNotesParams) ([]Note, e
 
 const updateNote = `-- name: UpdateNote :one
 UPDATE notes
-SET body = $3, archived_at = $4, updated_at = now()
+SET body = $3, archived_at = $4, archived_card = $5, updated_at = now()
 WHERE id = $1 AND owner_id = $2
-RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at
+RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card
 `
 
 type UpdateNoteParams struct {
-	ID         uuid.UUID          `json:"id"`
-	OwnerID    uuid.UUID          `json:"owner_id"`
-	Body       string             `json:"body"`
-	ArchivedAt pgtype.Timestamptz `json:"archived_at"`
+	ID           uuid.UUID          `json:"id"`
+	OwnerID      uuid.UUID          `json:"owner_id"`
+	Body         pgtype.Text        `json:"body"`
+	ArchivedAt   pgtype.Timestamptz `json:"archived_at"`
+	ArchivedCard bool               `json:"archived_card"`
 }
 
 func (q *Queries) UpdateNote(ctx context.Context, arg UpdateNoteParams) (Note, error) {
@@ -153,6 +386,7 @@ func (q *Queries) UpdateNote(ctx context.Context, arg UpdateNoteParams) (Note, e
 		arg.OwnerID,
 		arg.Body,
 		arg.ArchivedAt,
+		arg.ArchivedCard,
 	)
 	var i Note
 	err := row.Scan(
@@ -163,6 +397,11 @@ func (q *Queries) UpdateNote(ctx context.Context, arg UpdateNoteParams) (Note, e
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LinkKind,
+		&i.ReminderID,
+		&i.CardID,
+		&i.Snapshot,
+		&i.ArchivedCard,
 	)
 	return i, err
 }

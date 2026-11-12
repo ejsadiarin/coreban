@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/ejsadiarin/coreban/internal/feedlink"
 	"github.com/ejsadiarin/coreban/internal/helper"
 	"github.com/ejsadiarin/coreban/internal/moment"
 )
@@ -33,6 +34,9 @@ func (h *Handler) mountCards(r chi.Router) {
 type createCardRequest struct {
 	ColumnID uuid.UUID `json:"column_id"`
 	Title    string    `json:"title"`
+	// Note, when set, gives the card a note in the Feed: "new" adds one,
+	// a plain note's id converts that note (ADR-0003).
+	Note *string `json:"note"`
 }
 
 // decodeBody reads a bounded JSON body into v, writing 400 on failure.
@@ -63,7 +67,12 @@ func (h *Handler) createCard(w http.ResponseWriter, r *http.Request) {
 		helper.RespondErrorJSON(w, http.StatusBadRequest, "title is required")
 		return
 	}
-	c, err := h.Store.CreateCard(r.Context(), owner, boardID, req.ColumnID, title)
+	link, err := feedlink.Parse(req.Note)
+	if err != nil {
+		helper.RespondErrorJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	c, err := h.Store.CreateCard(r.Context(), owner, boardID, req.ColumnID, title, link)
 	if !respondCardError(w, err, "failed to create card") {
 		respondZoned(h, w, r, owner, http.StatusCreated, c)
 	}
@@ -257,6 +266,8 @@ func respondCardError(w http.ResponseWriter, err error, msg string) bool {
 		helper.RespondErrorJSON(w, http.StatusConflict, "the card is archived; restore it first")
 	case errors.Is(err, ErrColumnNotFound):
 		helper.RespondErrorJSON(w, http.StatusBadRequest, "column_id is not a column on this board")
+	case errors.Is(err, feedlink.ErrNotLinkable):
+		helper.RespondErrorJSON(w, http.StatusBadRequest, err.Error())
 	default:
 		return respondStoreError(w, err, msg)
 	}

@@ -43,7 +43,15 @@ Kanban boards and ntfy reminders, served as a downstream service behind
   paged back in time by a cursor that never skips or repeats a note.
 - Edit a note's text; **archive** collapses it in place (restorable);
   **permanently delete** is the only way to remove one. Notes are kept
-  forever otherwise. Linked records come later (ADR-0003).
+  forever otherwise.
+- **Linked notes** (ADR-0003): a reminder or card created with
+  `"note": "new"` gets a note in the same transaction, and `"note": "<note
+  id>"` converts a plain note in place. The note keeps no text of its own:
+  the feed shows the record as it is now. Whichever way the record is
+  deleted (directly, with its card, or with its board), a trigger saves its
+  last state on the note, shown as deleted. Archiving the note archives its
+  card or deletes its reminder; restoring brings back a card archived with
+  it.
 
 **Notification target and timezone**
 - Each owner sets their ntfy topic (always `coreban-…`, never a URL, one
