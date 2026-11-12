@@ -33,6 +33,9 @@ type Store struct {
 	Reminders ReminderRenderer
 	// Bucket holds attachment files; nil when none is configured.
 	Bucket *attachment.Bucket
+	// FilesQueued hears that a deleted note queued its attachments' files
+	// for deletion (the attachment cleaner's Wake); nil for none.
+	FilesQueued func()
 }
 
 func (s *Store) queries() *dbgen.Queries { return dbgen.New(s.Pool) }
@@ -257,14 +260,19 @@ func archiveRecord(ctx context.Context, q *dbgen.Queries, owner uuid.UUID, n dbg
 	return false, nil
 }
 
-// Delete permanently removes one of the owner's notes.
+// Delete permanently deletes one of the owner's notes. Its attachments'
+// rows go with it, and their files are queued for the cleaner in the same
+// transaction (ADR-0004).
 func (s *Store) Delete(ctx context.Context, owner, id uuid.UUID) error {
-	n, err := s.queries().DeleteNote(ctx, dbgen.DeleteNoteParams{ID: id, OwnerID: owner})
+	attached, err := s.queries().DeleteNote(ctx, dbgen.DeleteNoteParams{ID: id, OwnerID: owner})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
 	if err != nil {
 		return err
 	}
-	if n == 0 {
-		return ErrNotFound
+	if attached > 0 && s.FilesQueued != nil {
+		s.FilesQueued()
 	}
 	return nil
 }

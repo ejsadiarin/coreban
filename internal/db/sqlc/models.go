@@ -23,6 +23,16 @@ type Attachment struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type AttachmentDeletion struct {
+	Key           string             `json:"key"`
+	OwnerID       uuid.UUID          `json:"owner_id"`
+	SizeBytes     int64              `json:"size_bytes"`
+	Attempts      int32              `json:"attempts"`
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	LastError     pgtype.Text        `json:"last_error"`
+	QueuedAt      pgtype.Timestamptz `json:"queued_at"`
+}
+
 type Board struct {
 	ID        uuid.UUID          `json:"id"`
 	OwnerID   uuid.UUID          `json:"owner_id"`

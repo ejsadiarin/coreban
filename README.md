@@ -77,9 +77,19 @@ Kanban boards and ntfy reminders, served as a downstream service behind
   upload link works for 15 minutes; within them the owner could replace
   their own file with another of the same size and type (accepted).
 - Each owner may store `ATTACHMENT_QUOTA` (default 5GB), counting
-  archived notes and unfinished uploads; admins have no quota. Demo
-  guests (the gateway's `guest` scope) can't upload. Without
-  `S3_ENDPOINT` attachments are off and uploads answer 503.
+  archived notes, unfinished uploads, and files waiting to be deleted;
+  admins have no quota. Demo guests (the gateway's `guest` scope) can't
+  upload. Without `S3_ENDPOINT` attachments are off and uploads answer
+  503.
+- The bucket follows the database. Permanently deleting a note queues its
+  files (posters included) for deletion in the same transaction; an
+  upload no note took within 24 hours is swept hourly, its files queued
+  the same way. A cleaner inside coreban-api deletes queued files once
+  their upload links have expired (15 minutes after the upload was
+  reserved; sooner, the owner could upload a file again that nothing
+  tracks), retrying a refused delete with backoff (30s doubling to an
+  hour) until the bucket confirms. Several cleaners may run: each file is
+  leased to one at a time. Archiving and restoring never touch files.
 
 **Notification target and timezone**
 - Each owner sets their ntfy topic (always `coreban-…`, never a URL, one

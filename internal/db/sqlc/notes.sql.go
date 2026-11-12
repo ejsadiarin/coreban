@@ -162,9 +162,10 @@ func (q *Queries) DeleteLinkedReminder(ctx context.Context, arg DeleteLinkedRemi
 	return err
 }
 
-const deleteNote = `-- name: DeleteNote :execrows
+const deleteNote = `-- name: DeleteNote :one
 DELETE FROM notes
 WHERE id = $1 AND owner_id = $2
+RETURNING attachment_count
 `
 
 type DeleteNoteParams struct {
@@ -172,12 +173,13 @@ type DeleteNoteParams struct {
 	OwnerID uuid.UUID `json:"owner_id"`
 }
 
-func (q *Queries) DeleteNote(ctx context.Context, arg DeleteNoteParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteNote, arg.ID, arg.OwnerID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+// Returns how many attachments the note had: their files are now queued
+// for deletion.
+func (q *Queries) DeleteNote(ctx context.Context, arg DeleteNoteParams) (int16, error) {
+	row := q.db.QueryRow(ctx, deleteNote, arg.ID, arg.OwnerID)
+	var attachment_count int16
+	err := row.Scan(&attachment_count)
+	return attachment_count, err
 }
 
 const getNoteForUpdate = `-- name: GetNoteForUpdate :one

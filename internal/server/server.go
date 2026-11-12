@@ -59,3 +59,8 @@ func (s *Server) UseAttachments(b *attachment.Bucket, quota int64) {
 	s.Attachments.Bucket, s.Attachments.Quota = b, quota
 	s.Notes.Store.Bucket = b
 }
+
+// UseCleaner wakes c whenever a deleted note queues files for deletion.
+func (s *Server) UseCleaner(c *attachment.Cleaner) {
+	s.Notes.Store.FilesQueued = c.Wake
+}

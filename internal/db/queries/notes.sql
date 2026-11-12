@@ -31,9 +31,12 @@ SET body = $3, archived_at = $4, archived_card = $5, updated_at = now()
 WHERE id = $1 AND owner_id = $2
 RETURNING *;
 
--- name: DeleteNote :execrows
+-- name: DeleteNote :one
+-- Returns how many attachments the note had: their files are now queued
+-- for deletion.
 DELETE FROM notes
-WHERE id = $1 AND owner_id = $2;
+WHERE id = $1 AND owner_id = $2
+RETURNING attachment_count;
 
 -- name: CreateLinkedNote :exec
 -- A note for a record just captured from the Feed, at the end of the feed.

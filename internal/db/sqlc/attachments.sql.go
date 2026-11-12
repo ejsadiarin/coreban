@@ -35,18 +35,93 @@ func (q *Queries) AttachToNote(ctx context.Context, arg AttachToNoteParams) (int
 }
 
 const attachmentUsage = `-- name: AttachmentUsage :one
-SELECT COALESCE(SUM(size_bytes + COALESCE(poster_bytes, 0)), 0)::bigint
-FROM attachments
-WHERE owner_id = $1
+SELECT (
+    COALESCE((SELECT SUM(a.size_bytes + COALESCE(a.poster_bytes, 0)) FROM attachments a WHERE a.owner_id = $1::uuid), 0)
+  + COALESCE((SELECT SUM(d.size_bytes) FROM attachment_deletions d WHERE d.owner_id = $1::uuid), 0)
+)::bigint
 `
 
 // Bytes the owner stores or is uploading: posted attachments (archived
-// notes included), unposted uploads, and posters.
+// notes included), unposted uploads, posters, and files queued for
+// deletion that the bucket still holds.
 func (q *Queries) AttachmentUsage(ctx context.Context, ownerID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, attachmentUsage, ownerID)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const claimDeletions = `-- name: ClaimDeletions :many
+UPDATE attachment_deletions d
+SET next_attempt_at = $1
+WHERE d.key IN (
+    SELECT q.key FROM attachment_deletions q
+    WHERE q.next_attempt_at <= $2
+    ORDER BY q.next_attempt_at
+    LIMIT $3
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING d.key, d.attempts
+`
+
+type ClaimDeletionsParams struct {
+	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
+	Now        pgtype.Timestamptz `json:"now"`
+	MaxRows    int32              `json:"max_rows"`
+}
+
+type ClaimDeletionsRow struct {
+	Key      string `json:"key"`
+	Attempts int32  `json:"attempts"`
+}
+
+// Leases up to max_rows queued files due by now until lease_until, so no
+// other cleaner takes them meanwhile; the bucket is called after this
+// commits.
+func (q *Queries) ClaimDeletions(ctx context.Context, arg ClaimDeletionsParams) ([]ClaimDeletionsRow, error) {
+	rows, err := q.db.Query(ctx, claimDeletions, arg.LeaseUntil, arg.Now, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ClaimDeletionsRow{}
+	for rows.Next() {
+		var i ClaimDeletionsRow
+		if err := rows.Scan(&i.Key, &i.Attempts); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const deletionFailed = `-- name: DeletionFailed :exec
+UPDATE attachment_deletions
+SET attempts = attempts + 1, next_attempt_at = $1, last_error = $2
+WHERE key = $3
+`
+
+type DeletionFailedParams struct {
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	LastError     pgtype.Text        `json:"last_error"`
+	Key           string             `json:"key"`
+}
+
+func (q *Queries) DeletionFailed(ctx context.Context, arg DeletionFailedParams) error {
+	_, err := q.db.Exec(ctx, deletionFailed, arg.NextAttemptAt, arg.LastError, arg.Key)
+	return err
+}
+
+const deletionsDone = `-- name: DeletionsDone :exec
+DELETE FROM attachment_deletions WHERE key = ANY($1::text[])
+`
+
+func (q *Queries) DeletionsDone(ctx context.Context, keys []string) error {
+	_, err := q.db.Exec(ctx, deletionsDone, keys)
+	return err
 }
 
 const listNoteAttachments = `-- name: ListNoteAttachments :many
@@ -151,6 +226,18 @@ func (q *Queries) LockAttachmentOwner(ctx context.Context, ownerID uuid.UUID) er
 	return err
 }
 
+const nextDeletion = `-- name: NextDeletion :one
+SELECT MIN(next_attempt_at)::timestamptz FROM attachment_deletions
+`
+
+// When the next queued file is due, if any is queued.
+func (q *Queries) NextDeletion(ctx context.Context) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, nextDeletion)
+	var column_1 pgtype.Timestamptz
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const reserveAttachment = `-- name: ReserveAttachment :one
 INSERT INTO attachments (id, owner_id, kind, content_type, size_bytes, width, height, poster_bytes)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -194,4 +281,22 @@ func (q *Queries) ReserveAttachment(ctx context.Context, arg ReserveAttachmentPa
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const sweepUploads = `-- name: SweepUploads :execrows
+
+DELETE FROM attachments
+WHERE note_id IS NULL AND created_at < $1
+`
+
+// The cleaner works across owners: these are the only statements here not
+// scoped by owner_id.
+// Deletes uploads no note took before cutoff; the trigger queues their
+// files.
+func (q *Queries) SweepUploads(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, sweepUploads, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

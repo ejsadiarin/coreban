@@ -20,9 +20,14 @@ type Querier interface {
 	// Gives a just-posted note its uploads, in the order the ids were given.
 	AttachToNote(ctx context.Context, arg AttachToNoteParams) (int64, error)
 	// Bytes the owner stores or is uploading: posted attachments (archived
-	// notes included), unposted uploads, and posters.
+	// notes included), unposted uploads, posters, and files queued for
+	// deletion that the bucket still holds.
 	AttachmentUsage(ctx context.Context, ownerID uuid.UUID) (int64, error)
 	CardOnBoard(ctx context.Context, arg CardOnBoardParams) (uuid.UUID, error)
+	// Leases up to max_rows queued files due by now until lease_until, so no
+	// other cleaner takes them meanwhile; the bucket is called after this
+	// commits.
+	ClaimDeletions(ctx context.Context, arg ClaimDeletionsParams) ([]ClaimDeletionsRow, error)
 	// The earliest reminder of an owner with a notification target whose
 	// moment has come, or (recurring) whose next occurrence was worked out in a
 	// timezone the owner has since left. Locked for the claiming transaction;
@@ -60,8 +65,12 @@ type Querier interface {
 	// Deletes a note's reminder as the note is archived; the snapshot trigger
 	// keeps its last state on the note.
 	DeleteLinkedReminder(ctx context.Context, arg DeleteLinkedReminderParams) error
-	DeleteNote(ctx context.Context, arg DeleteNoteParams) (int64, error)
+	// Returns how many attachments the note had: their files are now queued
+	// for deletion.
+	DeleteNote(ctx context.Context, arg DeleteNoteParams) (int16, error)
 	DeleteReminder(ctx context.Context, arg DeleteReminderParams) (int64, error)
+	DeletionFailed(ctx context.Context, arg DeletionFailedParams) error
+	DeletionsDone(ctx context.Context, keys []string) error
 	// When the dispatcher next has something to send.
 	EarliestFireAt(ctx context.Context) (pgtype.Timestamptz, error)
 	GetBoard(ctx context.Context, arg GetBoardParams) (GetBoardRow, error)
@@ -126,6 +135,8 @@ type Querier interface {
 	// check and the insert can't interleave.
 	LockOwnerReminders(ctx context.Context, ownerID uuid.UUID) error
 	NextColumnPosition(ctx context.Context, boardID uuid.UUID) (int32, error)
+	// When the next queued file is due, if any is queued.
+	NextDeletion(ctx context.Context) (pgtype.Timestamptz, error)
 	PlaceCard(ctx context.Context, arg PlaceCardParams) error
 	PutOwnerSettings(ctx context.Context, arg PutOwnerSettingsParams) error
 	RecordDelivery(ctx context.Context, arg RecordDeliveryParams) error
@@ -146,6 +157,11 @@ type Querier interface {
 	// The first snapshot wins.
 	SaveRecordSnapshot(ctx context.Context, arg SaveRecordSnapshotParams) error
 	SetColumnPosition(ctx context.Context, arg SetColumnPositionParams) error
+	// The cleaner works across owners: these are the only statements here not
+	// scoped by owner_id.
+	// Deletes uploads no note took before cutoff; the trigger queues their
+	// files.
+	SweepUploads(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error)
 	// set_due replaces the due (both fields; NULLs clear it), else it's kept.
 	UpdateCard(ctx context.Context, arg UpdateCardParams) (int64, error)
 	UpdateColumn(ctx context.Context, arg UpdateColumnParams) error

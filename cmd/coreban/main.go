@@ -68,6 +68,9 @@ func serve(ctx context.Context, cfg *config.Config) error {
 			return err
 		}
 		api.UseAttachments(bucket, cfg.AttachmentQuota)
+		cleaner := attachment.NewCleaner(pool, bucket, time.Now)
+		api.UseCleaner(cleaner)
+		go cleaner.Run(ctx)
 	}
 	if cfg.NtfyURL == "" {
 		slog.Warn("coreban-api: NTFY_URL is not set; reminders will not be sent")
