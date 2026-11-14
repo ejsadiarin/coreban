@@ -70,9 +70,11 @@ func newOwnerIn(t *testing.T, tz string) owner {
 }
 
 // inZone is the owner after setting their timezone to tz at the gateway:
-// their requests carry it in the token.
+// the dispatcher's lookups answer it, and their requests carry it in the
+// token.
 func (o owner) inZone(tz string) owner {
 	o.t.Helper()
+	testharness.FakeGateway(o.t).SetZone(o.id.Owner, tz)
 	id := o.id
 	id.Timezone = tz
 	return as(o.t, id)

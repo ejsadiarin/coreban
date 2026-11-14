@@ -34,6 +34,12 @@ type Config struct {
 	NtfyURL   string
 	NtfyToken string
 
+	// The gateway's user timezone lookup, for the reminder dispatcher
+	// (the gateway's ADR-0005). GatewayAPIKey is a key owned by an admin
+	// and holding coreban:admin. Both are required when NtfyURL is set.
+	GatewayURL    string
+	GatewayAPIKey string
+
 	// ReminderCap is how many reminders one owner may have (REMINDER_CAP);
 	// 0 means the variable was not a positive whole number.
 	ReminderCap int
@@ -49,15 +55,17 @@ type Config struct {
 // Load reads the environment, applying defaults for local development.
 func Load() *Config {
 	return &Config{
-		Port:         getEnv("PORT", "6972"),
-		DatabaseURL:  os.Getenv("DATABASE_URL"),
-		MigrationURL: os.Getenv("MIGRATION_URL"),
-		JWTIssuer:    getEnv("JWT_ISSUER", "https://gateway.internal"),
-		JWTAudience:  getEnv("JWT_AUDIENCE", "coreban"),
-		JWTJWKSURL:   getEnv("JWT_JWKS_URL", "https://gateway.internal/.well-known/jwks.json"),
-		NtfyURL:      os.Getenv("NTFY_URL"),
-		NtfyToken:    os.Getenv("NTFY_TOKEN"),
-		ReminderCap:  positiveInt(getEnv("REMINDER_CAP", strconv.Itoa(reminder.DefaultCap))),
+		Port:          getEnv("PORT", "6972"),
+		DatabaseURL:   os.Getenv("DATABASE_URL"),
+		MigrationURL:  os.Getenv("MIGRATION_URL"),
+		JWTIssuer:     getEnv("JWT_ISSUER", "https://gateway.internal"),
+		JWTAudience:   getEnv("JWT_AUDIENCE", "coreban"),
+		JWTJWKSURL:    getEnv("JWT_JWKS_URL", "https://gateway.internal/.well-known/jwks.json"),
+		NtfyURL:       os.Getenv("NTFY_URL"),
+		NtfyToken:     os.Getenv("NTFY_TOKEN"),
+		GatewayURL:    os.Getenv("GATEWAY_URL"),
+		GatewayAPIKey: os.Getenv("GATEWAY_API_KEY"),
+		ReminderCap:   positiveInt(getEnv("REMINDER_CAP", strconv.Itoa(reminder.DefaultCap))),
 		Bucket: attachment.BucketConfig{
 			Endpoint:       os.Getenv("S3_ENDPOINT"),
 			PublicEndpoint: os.Getenv("S3_PUBLIC_ENDPOINT"),
@@ -85,6 +93,13 @@ func (c *Config) ValidateServe() error {
 		// The server denies anonymous access (README "ntfy server").
 		if c.NtfyToken == "" {
 			return fmt.Errorf("NTFY_TOKEN is required when NTFY_URL is set")
+		}
+		// The dispatcher reads each owner's timezone from the gateway.
+		if u, err := url.Parse(c.GatewayURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("GATEWAY_URL must be an http(s) URL when NTFY_URL is set")
+		}
+		if c.GatewayAPIKey == "" {
+			return fmt.Errorf("GATEWAY_API_KEY is required when NTFY_URL is set")
 		}
 	}
 	if c.Bucket.Endpoint != "" && c.AttachmentQuota == 0 {
