@@ -217,6 +217,7 @@ func (h *Handler) sync(w http.ResponseWriter, r *http.Request) {
 			"a sync takes at most "+strconv.Itoa(MaxSyncRecords)+" records")
 		return
 	}
+	loc, _ := time.LoadLocation(req.Timezone)
 	records := make([]SyncRecord, 0, len(req.Records))
 	for _, rec := range req.Records {
 		id, idErr := uuid.Parse(rec.ID)
@@ -229,6 +230,10 @@ func (h *Handler) sync(w http.ResponseWriter, r *http.Request) {
 		case idErr != nil, dateErr != nil, atErr != nil:
 			helper.RespondErrorJSON(w, http.StatusBadRequest,
 				"each record needs its id, its date (YYYY-MM-DD) and posted_at (RFC 3339)")
+			return
+		case postedAt.In(loc).Format(time.DateOnly) != date.Format(time.DateOnly):
+			helper.RespondErrorJSON(w, http.StatusBadRequest,
+				"each record's posted_at must fall on its date in the timezone")
 			return
 		}
 		records = append(records, SyncRecord{Kind: rec.Kind, ID: id, Date: date, PostedAt: postedAt})

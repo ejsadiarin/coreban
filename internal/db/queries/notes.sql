@@ -98,17 +98,24 @@ UPDATE notes
 SET snapshot = $3, updated_at = now()
 WHERE id = $1 AND owner_id = $2 AND record_id IS NOT NULL AND snapshot IS NULL;
 
--- name: SyncRecordNote :one
--- Gives a budget record its note at posted_at, unless it has one. An
--- existing note moves to posted_at only when its local date (in tz) isn't
--- the record's date, so it keeps its time of day until the record is
--- re-dated. inserted tells a new note from a moved one; no row means the
--- note was already in place.
+-- name: SyncRecordNotes :many
+-- Gives each budget record its note at posted_at, unless it has one, in
+-- one statement. An existing note moves to posted_at only when its local
+-- date (in tz) isn't posted_at's, which is the record's date, so it keeps
+-- its time of day until the record is re-dated. One row per note created
+-- or moved; inserted tells which. The records must be distinct.
 INSERT INTO notes (id, owner_id, link_kind, record_id, posted_at, origin)
-VALUES (sqlc.arg(id), sqlc.arg(owner_id), sqlc.arg(link_kind), sqlc.arg(record_id), sqlc.arg(posted_at), 'budget')
+SELECT r.id, sqlc.arg(owner_id), r.kind, r.record_id, r.posted_at, 'budget'
+FROM (
+    -- Equal-length arrays unnest side by side, one row per record.
+    SELECT unnest(sqlc.arg(ids)::uuid[]) AS id, unnest(sqlc.arg(kinds)::text[]) AS kind,
+           unnest(sqlc.arg(record_ids)::uuid[]) AS record_id,
+           unnest(sqlc.arg(posted_ats)::timestamptz[]) AS posted_at
+) r
 ON CONFLICT (owner_id, link_kind, record_id) WHERE record_id IS NOT NULL
 DO UPDATE SET posted_at = EXCLUDED.posted_at, updated_at = now()
-WHERE (notes.posted_at AT TIME ZONE sqlc.arg(tz)::text)::date <> sqlc.arg(record_date)::date
+WHERE (notes.posted_at AT TIME ZONE sqlc.arg(tz)::text)::date
+   <> (EXCLUDED.posted_at AT TIME ZONE sqlc.arg(tz)::text)::date
 RETURNING (xmax = 0) AS inserted;
 
 -- name: DeleteRecordNote :one

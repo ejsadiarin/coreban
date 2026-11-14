@@ -95,8 +95,8 @@ func TestSyncedRecordsSitOnTheirOwnDatesBeforeANoteFromToday(t *testing.T) {
 		t.Errorf("synced note posted_at = %v, want %v", feed[0].PostedAt, want)
 	}
 
-	if got := o.sync(jun2, may5); got != (syncResult{}) {
-		t.Errorf("second sync = %+v, want nothing created or moved", got)
+	if got := o.sync(jun2, may5, may5); got != (syncResult{}) {
+		t.Errorf("second sync = %+v, want nothing created or moved (a record named twice counts once)", got)
 	}
 	if n := len(o.syncedFeed("").Notes); n != 3 {
 		t.Errorf("feed has %d notes after a repeat sync, want 3", n)
@@ -135,6 +135,8 @@ func TestSyncTakesOnlyExpensesAndIncomesWithDatesAndATimezone(t *testing.T) {
 		{"timezone": manila, "records": []syncRecord{{Kind: "expense", ID: "nope", Date: "2026-05-05", PostedAt: at("2026-05-05T12:00:00")}}},
 		{"timezone": manila, "records": []syncRecord{{Kind: "expense", ID: uuid.NewString(), Date: "May 5", PostedAt: at("2026-05-05T12:00:00")}}},
 		{"timezone": "Mars/Olympus", "records": []syncRecord{record("expense", "2026-05-05", "12:00:00")}},
+		// posted_at must fall on the record's date in the timezone.
+		{"timezone": manila, "records": []syncRecord{{Kind: "expense", ID: uuid.NewString(), Date: "2026-05-05", PostedAt: "2026-05-05T20:00:00Z"}}},
 	}
 	for i, body := range bad {
 		if rec := o.do(http.MethodPost, "/api/coreban/notes/sync", body); rec.Code != http.StatusBadRequest {

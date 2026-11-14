@@ -168,12 +168,12 @@ type Querier interface {
 	// Deletes uploads no note took before cutoff; the trigger queues their
 	// files.
 	SweepUploads(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error)
-	// Gives a budget record its note at posted_at, unless it has one. An
-	// existing note moves to posted_at only when its local date (in tz) isn't
-	// the record's date, so it keeps its time of day until the record is
-	// re-dated. inserted tells a new note from a moved one; no row means the
-	// note was already in place.
-	SyncRecordNote(ctx context.Context, arg SyncRecordNoteParams) (bool, error)
+	// Gives each budget record its note at posted_at, unless it has one, in
+	// one statement. An existing note moves to posted_at only when its local
+	// date (in tz) isn't posted_at's, which is the record's date, so it keeps
+	// its time of day until the record is re-dated. One row per note created
+	// or moved; inserted tells which. The records must be distinct.
+	SyncRecordNotes(ctx context.Context, arg SyncRecordNotesParams) ([]bool, error)
 	// set_due replaces the due (both fields; NULLs clear it), else it's kept.
 	UpdateCard(ctx context.Context, arg UpdateCardParams) (int64, error)
 	UpdateColumn(ctx context.Context, arg UpdateColumnParams) error

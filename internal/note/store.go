@@ -165,36 +165,37 @@ func (s *Store) Feed(ctx context.Context, owner uuid.UUID, before *Cursor, scope
 }
 
 // Sync gives each budget record a note on its own date (ADR-0005), in one
-// transaction: a record without a note gets one at its PostedAt, and a
-// note whose local date (in tz, an IANA name) isn't its record's Date
-// moves to PostedAt. It reports how many notes it created and moved.
+// statement: a record without a note gets one at its PostedAt, and a note
+// whose local date (in tz, an IANA name) isn't its record's moves to
+// PostedAt, which must fall on the record's date. A record named twice
+// counts once. It reports how many notes it created and moved.
 func (s *Store) Sync(ctx context.Context, owner uuid.UUID, tz string, records []SyncRecord) (created, moved int, err error) {
-	err = pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
-		q := dbgen.New(tx)
-		for _, r := range records {
-			inserted, err := q.SyncRecordNote(ctx, dbgen.SyncRecordNoteParams{
-				ID: uuid.New(), OwnerID: owner,
-				LinkKind:   pgtype.Text{String: r.Kind, Valid: true},
-				RecordID:   pgtype.UUID{Bytes: r.ID, Valid: true},
-				PostedAt:   pgtype.Timestamptz{Time: r.PostedAt, Valid: true},
-				Tz:         tz,
-				RecordDate: pgtype.Date{Time: r.Date, Valid: true},
-			})
-			switch {
-			case errors.Is(err, pgx.ErrNoRows):
-				// Already in place.
-			case err != nil:
-				return fmt.Errorf("sync %s %s: %w", r.Kind, r.ID, err)
-			case inserted:
-				created++
-			default:
-				moved++
-			}
+	p := dbgen.SyncRecordNotesParams{OwnerID: owner, Tz: tz}
+	seen := map[[2]string]bool{}
+	for _, r := range records {
+		k := [2]string{r.Kind, r.ID.String()}
+		if seen[k] {
+			continue
 		}
-		return nil
-	})
+		seen[k] = true
+		p.Ids = append(p.Ids, uuid.New())
+		p.Kinds = append(p.Kinds, r.Kind)
+		p.RecordIds = append(p.RecordIds, r.ID)
+		p.PostedAts = append(p.PostedAts, pgtype.Timestamptz{Time: r.PostedAt, Valid: true})
+	}
+	if len(p.Ids) == 0 {
+		return 0, 0, nil
+	}
+	rows, err := s.queries().SyncRecordNotes(ctx, p)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, fmt.Errorf("sync budget notes: %w", err)
+	}
+	for _, inserted := range rows {
+		if inserted {
+			created++
+		} else {
+			moved++
+		}
 	}
 	return created, moved, nil
 }

@@ -160,7 +160,7 @@ const (
 )
 
 // SyncRecord is one budget record the web asks to have a note: Date is
-// the record's date, PostedAt where a new note for it goes.
+// the record's date, PostedAt where a new note for it goes, on that date.
 type SyncRecord struct {
 	Kind     string
 	ID       uuid.UUID
