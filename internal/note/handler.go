@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -14,6 +15,7 @@ import (
 	"github.com/ejsadiarin/coreban/internal/auth"
 	"github.com/ejsadiarin/coreban/internal/feedlink"
 	"github.com/ejsadiarin/coreban/internal/helper"
+	"github.com/ejsadiarin/coreban/internal/settings"
 )
 
 // maxNoteBody bounds a note request: one note's text, with room for JSON
@@ -30,12 +32,15 @@ type Handler struct {
 func (h *Handler) Mount(r chi.Router) {
 	r.Get("/", h.feed)
 	r.Post("/", h.post)
+	r.Post("/sync", h.sync)
+	r.Delete("/records/{kind}/{recordID}", h.removeRecord)
 	r.Patch("/{id}", h.edit)
 	r.Delete("/{id}", h.remove)
 }
 
 // feed answers one page of the feed: ?limit= notes (default
-// DefaultPageSize, at most MaxPageSize) before the ?before= cursor.
+// DefaultPageSize, at most MaxPageSize) before the ?before= cursor, within
+// ?only= (budget or notes; all when absent).
 func (h *Handler) feed(w http.ResponseWriter, r *http.Request) {
 	owner, ok := helper.ResolveTargetUser(w, r)
 	if !ok {
@@ -60,8 +65,13 @@ func (h *Handler) feed(w http.ResponseWriter, r *http.Request) {
 		}
 		before = &c
 	}
+	scope := q.Get("only")
+	if scope != ScopeAll && scope != ScopeBudget && scope != ScopeNotes {
+		helper.RespondErrorJSON(w, http.StatusBadRequest, `only must be "budget" or "notes"`)
+		return
+	}
 	caller, _ := auth.UserIDFromContext(r.Context())
-	p, err := h.Store.Feed(r.Context(), owner, before, size, owner == caller)
+	p, err := h.Store.Feed(r.Context(), owner, before, scope, size, owner == caller)
 	if err != nil {
 		helper.RespondErrorJSON(w, http.StatusInternalServerError, "failed to load the feed")
 		return
@@ -164,6 +174,92 @@ func (h *Handler) postRecord(w http.ResponseWriter, r *http.Request, owner uuid.
 	}
 }
 
+// maxSyncBody bounds a sync request: MaxSyncRecords records of about
+// 150 bytes each.
+const maxSyncBody = 256 << 10
+
+type syncRequest struct {
+	Timezone string `json:"timezone"`
+	Records  []struct {
+		Kind     string `json:"kind"`
+		ID       string `json:"id"`
+		Date     string `json:"date"`
+		PostedAt string `json:"posted_at"`
+	} `json:"records"`
+}
+
+type syncResponse struct {
+	Created int `json:"created"`
+	Moved   int `json:"moved"`
+}
+
+// sync gives the caller's budget records their notes (ADR-0005): the web
+// sends each expense or income it read from corefinance, with the record's
+// date and where a new note for it goes, plus the owner's timezone, which
+// decides whether a note is still on its record's date.
+func (h *Handler) sync(w http.ResponseWriter, r *http.Request) {
+	owner, ok := helper.GetUserID(w, r)
+	if !ok {
+		return
+	}
+	var req syncRequest
+	r.Body = http.MaxBytesReader(w, r.Body, maxSyncBody)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		helper.RespondErrorJSON(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !settings.ValidTimezone(req.Timezone) {
+		helper.RespondErrorJSON(w, http.StatusBadRequest, "timezone must be an IANA name such as Asia/Manila")
+		return
+	}
+	if len(req.Records) > MaxSyncRecords {
+		helper.RespondErrorJSON(w, http.StatusBadRequest,
+			"a sync takes at most "+strconv.Itoa(MaxSyncRecords)+" records")
+		return
+	}
+	records := make([]SyncRecord, 0, len(req.Records))
+	for _, rec := range req.Records {
+		id, idErr := uuid.Parse(rec.ID)
+		date, dateErr := time.Parse(time.DateOnly, rec.Date)
+		postedAt, atErr := time.Parse(time.RFC3339, rec.PostedAt)
+		switch {
+		case !feedlink.CrossService(rec.Kind):
+			helper.RespondErrorJSON(w, http.StatusBadRequest, `each record's kind must be "expense" or "income"`)
+			return
+		case idErr != nil, dateErr != nil, atErr != nil:
+			helper.RespondErrorJSON(w, http.StatusBadRequest,
+				"each record needs its id, its date (YYYY-MM-DD) and posted_at (RFC 3339)")
+			return
+		}
+		records = append(records, SyncRecord{Kind: rec.Kind, ID: id, Date: date, PostedAt: postedAt})
+	}
+	created, moved, err := h.Store.Sync(r.Context(), owner, req.Timezone, records)
+	if err != nil {
+		helper.RespondErrorJSON(w, http.StatusInternalServerError, "failed to sync budget notes")
+		return
+	}
+	helper.RespondJSON(w, http.StatusOK, syncResponse{Created: created, Moved: moved})
+}
+
+// removeRecord deletes a budget record's note after the web deleted the
+// record from the Budget page: only a note the sync made goes (409 for one
+// posted from the Feed).
+func (h *Handler) removeRecord(w http.ResponseWriter, r *http.Request) {
+	owner, ok := helper.GetUserID(w, r)
+	if !ok {
+		return
+	}
+	kind := chi.URLParam(r, "kind")
+	id, err := uuid.Parse(chi.URLParam(r, "recordID"))
+	if !feedlink.CrossService(kind) || err != nil {
+		helper.RespondErrorJSON(w, http.StatusNotFound, "note not found")
+		return
+	}
+	if !respondStoreError(w, h.Store.DeleteRecord(r.Context(), owner, kind, id), "failed to delete note") {
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 type editRequest struct {
 	Text     *string         `json:"text"`
 	Archived *bool           `json:"archived"`
@@ -261,6 +357,8 @@ func respondStoreError(w http.ResponseWriter, err error, msg string) bool {
 		helper.RespondErrorJSON(w, http.StatusConflict, "an attachment hasn't finished uploading; try again once it has")
 	case errors.Is(err, attachment.ErrNoBucket):
 		helper.RespondErrorJSON(w, http.StatusServiceUnavailable, err.Error())
+	case errors.Is(err, ErrPostedFromFeed):
+		helper.RespondErrorJSON(w, http.StatusConflict, "the note was posted from the Feed; it keeps the record's snapshot")
 	case errors.Is(err, ErrTakesNoSnapshot):
 		helper.RespondErrorJSON(w, http.StatusConflict, "only an expense or income note takes a snapshot")
 	default:

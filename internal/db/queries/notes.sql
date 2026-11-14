@@ -9,14 +9,19 @@ VALUES ($1, $2, $3, $4)
 RETURNING *;
 
 -- name: ListNotes :many
--- One page of the feed going back in time: the newest notes older than
--- the cursor (seq below before_seq), newest first. The caller asks for one
--- more than it shows to learn whether an older page exists.
+-- One page of the feed going back in time: the newest notes placed before
+-- the cursor (posted_at, then seq), newest first. scope narrows it to
+-- 'budget' (expense and income notes) or 'notes' (everything else). The
+-- caller asks for one more than it shows to learn whether an older page
+-- exists.
 SELECT *
 FROM notes
 WHERE owner_id = sqlc.arg(owner_id)
-  AND (sqlc.narg(before_seq)::bigint IS NULL OR seq < sqlc.narg(before_seq)::bigint)
-ORDER BY seq DESC
+  AND (sqlc.narg(before_posted_at)::timestamptz IS NULL
+       OR (posted_at, seq) < (sqlc.narg(before_posted_at)::timestamptz, sqlc.narg(before_seq)::bigint))
+  AND (sqlc.narg(scope)::text IS NULL
+       OR (sqlc.narg(scope)::text = 'budget') = COALESCE(link_kind IN ('expense', 'income'), false))
+ORDER BY posted_at DESC, seq DESC
 LIMIT sqlc.arg(row_limit);
 
 -- name: GetNoteForUpdate :one
@@ -92,3 +97,29 @@ RETURNING *;
 UPDATE notes
 SET snapshot = $3, updated_at = now()
 WHERE id = $1 AND owner_id = $2 AND record_id IS NOT NULL AND snapshot IS NULL;
+
+-- name: SyncRecordNote :one
+-- Gives a budget record its note at posted_at, unless it has one. An
+-- existing note moves to posted_at only when its local date (in tz) isn't
+-- the record's date, so it keeps its time of day until the record is
+-- re-dated. inserted tells a new note from a moved one; no row means the
+-- note was already in place.
+INSERT INTO notes (id, owner_id, link_kind, record_id, posted_at, origin)
+VALUES (sqlc.arg(id), sqlc.arg(owner_id), sqlc.arg(link_kind), sqlc.arg(record_id), sqlc.arg(posted_at), 'budget')
+ON CONFLICT (owner_id, link_kind, record_id) WHERE record_id IS NOT NULL
+DO UPDATE SET posted_at = EXCLUDED.posted_at, updated_at = now()
+WHERE (notes.posted_at AT TIME ZONE sqlc.arg(tz)::text)::date <> sqlc.arg(record_date)::date
+RETURNING (xmax = 0) AS inserted;
+
+-- name: DeleteRecordNote :one
+-- Deletes the note of a budget record, if the sync made it. Returns the
+-- origin of the note found, so a note posted from the Feed can be told
+-- apart: it is kept (ADR-0003).
+WITH found AS (
+    SELECT n.id, n.origin FROM notes n
+    WHERE n.owner_id = $1 AND n.link_kind = $2 AND n.record_id = $3
+), gone AS (
+    DELETE FROM notes d USING found f
+    WHERE d.id = f.id AND f.origin = 'budget'
+)
+SELECT origin FROM found;

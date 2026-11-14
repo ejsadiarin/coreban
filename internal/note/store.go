@@ -132,14 +132,19 @@ func (s *Store) PostRecord(ctx context.Context, owner uuid.UUID, kind string, re
 
 const uniqueViolation = "23505"
 
-// Feed returns one page of the owner's feed: the newest size notes posted
-// before the cursor (or the newest of all, with none), oldest first. Links
-// to attachments are signed only with links set: an admin's targeted read
-// of another owner sees that they exist, never the files.
-func (s *Store) Feed(ctx context.Context, owner uuid.UUID, before *Cursor, size int, links bool) (Page, error) {
+// Feed returns one page of the owner's feed: the newest size notes placed
+// before the cursor (or the newest of all, with none), oldest first, within
+// scope (ScopeAll, ScopeBudget or ScopeNotes). Links to attachments are
+// signed only with links set: an admin's targeted read of another owner
+// sees that they exist, never the files.
+func (s *Store) Feed(ctx context.Context, owner uuid.UUID, before *Cursor, scope string, size int, links bool) (Page, error) {
 	params := dbgen.ListNotesParams{OwnerID: owner, RowLimit: int32(size + 1)}
 	if before != nil {
-		params.BeforeSeq = pgtype.Int8{Int64: int64(*before), Valid: true}
+		params.BeforePostedAt = pgtype.Timestamptz{Time: before.PostedAt, Valid: true}
+		params.BeforeSeq = pgtype.Int8{Int64: before.Seq, Valid: true}
+	}
+	if scope != ScopeAll {
+		params.Scope = pgtype.Text{String: scope, Valid: true}
 	}
 	rows, err := s.queries().ListNotes(ctx, params)
 	if err != nil {
@@ -147,7 +152,8 @@ func (s *Store) Feed(ctx context.Context, owner uuid.UUID, before *Cursor, size 
 	}
 	var p Page
 	if len(rows) > size {
-		older := Cursor(rows[size-1].Seq).String()
+		last := rows[size-1]
+		older := Cursor{PostedAt: last.PostedAt.Time, Seq: last.Seq}.String()
 		p.Older = &older
 		rows = rows[:size]
 	}
@@ -156,6 +162,60 @@ func (s *Store) Feed(ctx context.Context, owner uuid.UUID, before *Cursor, size 
 		return Page{}, err
 	}
 	return p, nil
+}
+
+// Sync gives each budget record a note on its own date (ADR-0005), in one
+// transaction: a record without a note gets one at its PostedAt, and a
+// note whose local date (in tz, an IANA name) isn't its record's Date
+// moves to PostedAt. It reports how many notes it created and moved.
+func (s *Store) Sync(ctx context.Context, owner uuid.UUID, tz string, records []SyncRecord) (created, moved int, err error) {
+	err = pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+		q := dbgen.New(tx)
+		for _, r := range records {
+			inserted, err := q.SyncRecordNote(ctx, dbgen.SyncRecordNoteParams{
+				ID: uuid.New(), OwnerID: owner,
+				LinkKind:   pgtype.Text{String: r.Kind, Valid: true},
+				RecordID:   pgtype.UUID{Bytes: r.ID, Valid: true},
+				PostedAt:   pgtype.Timestamptz{Time: r.PostedAt, Valid: true},
+				Tz:         tz,
+				RecordDate: pgtype.Date{Time: r.Date, Valid: true},
+			})
+			switch {
+			case errors.Is(err, pgx.ErrNoRows):
+				// Already in place.
+			case err != nil:
+				return fmt.Errorf("sync %s %s: %w", r.Kind, r.ID, err)
+			case inserted:
+				created++
+			default:
+				moved++
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	return created, moved, nil
+}
+
+// DeleteRecord deletes the note of one of the owner's budget records when
+// the sync made it. A note posted from the Feed stays (ErrPostedFromFeed);
+// a record with no note is ErrNotFound.
+func (s *Store) DeleteRecord(ctx context.Context, owner uuid.UUID, kind string, recordID uuid.UUID) error {
+	origin, err := s.queries().DeleteRecordNote(ctx, dbgen.DeleteRecordNoteParams{
+		OwnerID: owner, LinkKind: pgtype.Text{String: kind, Valid: true},
+		RecordID: pgtype.UUID{Bytes: recordID, Valid: true},
+	})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return ErrNotFound
+	case err != nil:
+		return err
+	case origin != OriginBudget:
+		return ErrPostedFromFeed
+	}
+	return nil
 }
 
 // Edit is a change to one note; nil fields are left as they are.
@@ -371,6 +431,7 @@ func (s *Store) render(ctx context.Context, owner uuid.UUID, rows []dbgen.Note, 
 	for i, r := range rows {
 		n := Note{
 			ID: r.ID, Text: r.Body.String, Attachments: attached[r.ID],
+			PostedAt: r.PostedAt.Time, Origin: r.Origin,
 			CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
 		}
 		if r.ArchivedAt.Valid {

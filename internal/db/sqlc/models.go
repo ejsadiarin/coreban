@@ -91,6 +91,8 @@ type Note struct {
 	ArchivedCard    bool               `json:"archived_card"`
 	RecordID        pgtype.UUID        `json:"record_id"`
 	AttachmentCount int16              `json:"attachment_count"`
+	PostedAt        pgtype.Timestamptz `json:"posted_at"`
+	Origin          string             `json:"origin"`
 }
 
 type NoteCard struct {

@@ -293,7 +293,7 @@ func TestOwnersNeverSeeOrTouchEachOthersNotes(t *testing.T) {
 	}
 
 	// A bob cursor can't page into alice's notes either.
-	if f := bob.feed("?before=999999999"); len(f.Notes) != 0 {
+	if f := bob.feed("?before=99999999999999999.999999999"); len(f.Notes) != 0 {
 		t.Errorf("bob paging sees %q", texts(f.Notes))
 	}
 

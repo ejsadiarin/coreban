@@ -72,17 +72,17 @@ func normalize(v Settings) (Settings, error) {
 		return Settings{}, err
 	}
 	tz := strings.TrimSpace(v.Timezone)
-	if !validTimezone(tz) {
+	if !ValidTimezone(tz) {
 		return Settings{}, invalid("timezone must be an IANA zone such as Asia/Manila")
 	}
 	return Settings{NtfyTopic: topic, Timezone: tz}, nil
 }
 
-// validTimezone reports whether tz names an IANA zone. "Local" is refused:
+// ValidTimezone reports whether tz names an IANA zone. "Local" is refused:
 // it means the server's zone, not the owner's. So are the host zoneinfo's
 // extras (posix/, right/, Factory, posixrules), which LoadLocation finds on
 // a dev box but the embedded tzdata in the image does not have.
-func validTimezone(tz string) bool {
+func ValidTimezone(tz string) bool {
 	switch {
 	case tz == "", tz == "Local", tz == "Factory", tz == "posixrules",
 		strings.HasPrefix(tz, "posix/"), strings.HasPrefix(tz, "right/"):

@@ -68,6 +68,10 @@ type Querier interface {
 	// Returns how many attachments the note had: their files are now queued
 	// for deletion.
 	DeleteNote(ctx context.Context, arg DeleteNoteParams) (int16, error)
+	// Deletes the note of a budget record, if the sync made it. Returns the
+	// origin of the note found, so a note posted from the Feed can be told
+	// apart: it is kept (ADR-0003).
+	DeleteRecordNote(ctx context.Context, arg DeleteRecordNoteParams) (string, error)
 	DeleteReminder(ctx context.Context, arg DeleteReminderParams) (int64, error)
 	DeletionFailed(ctx context.Context, arg DeletionFailedParams) error
 	DeletionsDone(ctx context.Context, keys []string) error
@@ -108,9 +112,11 @@ type Querier interface {
 	ListNoteCards(ctx context.Context, arg ListNoteCardsParams) ([]ListNoteCardsRow, error)
 	// The owner's reminders among ids, as their notes show them.
 	ListNoteReminders(ctx context.Context, arg ListNoteRemindersParams) ([]ListNoteRemindersRow, error)
-	// One page of the feed going back in time: the newest notes older than
-	// the cursor (seq below before_seq), newest first. The caller asks for one
-	// more than it shows to learn whether an older page exists.
+	// One page of the feed going back in time: the newest notes placed before
+	// the cursor (posted_at, then seq), newest first. scope narrows it to
+	// 'budget' (expense and income notes) or 'notes' (everything else). The
+	// caller asks for one more than it shows to learn whether an older page
+	// exists.
 	ListNotes(ctx context.Context, arg ListNotesParams) ([]Note, error)
 	ListOwnerReminders(ctx context.Context, arg ListOwnerRemindersParams) ([]ListOwnerRemindersRow, error)
 	// The owner's uploads among ids that no note has taken yet.
@@ -162,6 +168,12 @@ type Querier interface {
 	// Deletes uploads no note took before cutoff; the trigger queues their
 	// files.
 	SweepUploads(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error)
+	// Gives a budget record its note at posted_at, unless it has one. An
+	// existing note moves to posted_at only when its local date (in tz) isn't
+	// the record's date, so it keeps its time of day until the record is
+	// re-dated. inserted tells a new note from a moved one; no row means the
+	// note was already in place.
+	SyncRecordNote(ctx context.Context, arg SyncRecordNoteParams) (bool, error)
 	// set_due replaces the due (both fields; NULLs clear it), else it's kept.
 	UpdateCard(ctx context.Context, arg UpdateCardParams) (int64, error)
 	UpdateColumn(ctx context.Context, arg UpdateColumnParams) error

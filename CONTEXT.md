@@ -73,9 +73,9 @@ An image or video posted with a plain note and kept with it: up to ten per note,
 _Avoid_: media, file, upload, linked record
 
 **Budget record**:
-An expense or income in corefinance that a note links. coreban keeps only its id; the web reads it from corefinance, and saves what it last showed as the note's snapshot once the record is gone.
+An expense or income in corefinance that a note links. coreban keeps only its id; the web reads it from corefinance. Every budget record has a note: the web's sync creates the ones the Feed didn't (ADR-0005). A synced note goes when its record does; a note posted from the Feed keeps what it last showed as its snapshot.
 _Avoid_: transaction, entry, finance item
 
 **Feed**:
-An owner's notes in the order they were posted, newest last, like a chat with themselves.
+An owner's notes in order of when they were posted (or, for a budget record's note, the record's date), newest last, like a chat with themselves. Every budget record has a note in it (ADR-0005).
 _Avoid_: chat, inbox, timeline, stream

@@ -62,7 +62,7 @@ const createNote = `-- name: CreateNote :one
 
 INSERT INTO notes (id, owner_id, body, attachment_count)
 VALUES ($1, $2, $3, $4)
-RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id, attachment_count
+RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id, attachment_count, posted_at, origin
 `
 
 type CreateNoteParams struct {
@@ -99,6 +99,8 @@ func (q *Queries) CreateNote(ctx context.Context, arg CreateNoteParams) (Note, e
 		&i.ArchivedCard,
 		&i.RecordID,
 		&i.AttachmentCount,
+		&i.PostedAt,
+		&i.Origin,
 	)
 	return i, err
 }
@@ -106,7 +108,7 @@ func (q *Queries) CreateNote(ctx context.Context, arg CreateNoteParams) (Note, e
 const createRecordNote = `-- name: CreateRecordNote :one
 INSERT INTO notes (id, owner_id, link_kind, record_id)
 VALUES ($1, $2, $3, $4)
-RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id, attachment_count
+RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id, attachment_count, posted_at, origin
 `
 
 type CreateRecordNoteParams struct {
@@ -142,6 +144,8 @@ func (q *Queries) CreateRecordNote(ctx context.Context, arg CreateRecordNotePara
 		&i.ArchivedCard,
 		&i.RecordID,
 		&i.AttachmentCount,
+		&i.PostedAt,
+		&i.Origin,
 	)
 	return i, err
 }
@@ -182,8 +186,35 @@ func (q *Queries) DeleteNote(ctx context.Context, arg DeleteNoteParams) (int16, 
 	return attachment_count, err
 }
 
+const deleteRecordNote = `-- name: DeleteRecordNote :one
+WITH found AS (
+    SELECT n.id, n.origin FROM notes n
+    WHERE n.owner_id = $1 AND n.link_kind = $2 AND n.record_id = $3
+), gone AS (
+    DELETE FROM notes d USING found f
+    WHERE d.id = f.id AND f.origin = 'budget'
+)
+SELECT origin FROM found
+`
+
+type DeleteRecordNoteParams struct {
+	OwnerID  uuid.UUID   `json:"owner_id"`
+	LinkKind pgtype.Text `json:"link_kind"`
+	RecordID pgtype.UUID `json:"record_id"`
+}
+
+// Deletes the note of a budget record, if the sync made it. Returns the
+// origin of the note found, so a note posted from the Feed can be told
+// apart: it is kept (ADR-0003).
+func (q *Queries) DeleteRecordNote(ctx context.Context, arg DeleteRecordNoteParams) (string, error) {
+	row := q.db.QueryRow(ctx, deleteRecordNote, arg.OwnerID, arg.LinkKind, arg.RecordID)
+	var origin string
+	err := row.Scan(&origin)
+	return origin, err
+}
+
 const getNoteForUpdate = `-- name: GetNoteForUpdate :one
-SELECT id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id, attachment_count
+SELECT id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id, attachment_count, posted_at, origin
 FROM notes
 WHERE id = $1 AND owner_id = $2
 FOR UPDATE
@@ -212,6 +243,8 @@ func (q *Queries) GetNoteForUpdate(ctx context.Context, arg GetNoteForUpdatePara
 		&i.ArchivedCard,
 		&i.RecordID,
 		&i.AttachmentCount,
+		&i.PostedAt,
+		&i.Origin,
 	)
 	return i, err
 }
@@ -373,25 +406,38 @@ func (q *Queries) ListNoteReminders(ctx context.Context, arg ListNoteRemindersPa
 }
 
 const listNotes = `-- name: ListNotes :many
-SELECT id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id, attachment_count
+SELECT id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id, attachment_count, posted_at, origin
 FROM notes
 WHERE owner_id = $1
-  AND ($2::bigint IS NULL OR seq < $2::bigint)
-ORDER BY seq DESC
-LIMIT $3
+  AND ($2::timestamptz IS NULL
+       OR (posted_at, seq) < ($2::timestamptz, $3::bigint))
+  AND ($4::text IS NULL
+       OR ($4::text = 'budget') = COALESCE(link_kind IN ('expense', 'income'), false))
+ORDER BY posted_at DESC, seq DESC
+LIMIT $5
 `
 
 type ListNotesParams struct {
-	OwnerID   uuid.UUID   `json:"owner_id"`
-	BeforeSeq pgtype.Int8 `json:"before_seq"`
-	RowLimit  int32       `json:"row_limit"`
+	OwnerID        uuid.UUID          `json:"owner_id"`
+	BeforePostedAt pgtype.Timestamptz `json:"before_posted_at"`
+	BeforeSeq      pgtype.Int8        `json:"before_seq"`
+	Scope          pgtype.Text        `json:"scope"`
+	RowLimit       int32              `json:"row_limit"`
 }
 
-// One page of the feed going back in time: the newest notes older than
-// the cursor (seq below before_seq), newest first. The caller asks for one
-// more than it shows to learn whether an older page exists.
+// One page of the feed going back in time: the newest notes placed before
+// the cursor (posted_at, then seq), newest first. scope narrows it to
+// 'budget' (expense and income notes) or 'notes' (everything else). The
+// caller asks for one more than it shows to learn whether an older page
+// exists.
 func (q *Queries) ListNotes(ctx context.Context, arg ListNotesParams) ([]Note, error) {
-	rows, err := q.db.Query(ctx, listNotes, arg.OwnerID, arg.BeforeSeq, arg.RowLimit)
+	rows, err := q.db.Query(ctx, listNotes,
+		arg.OwnerID,
+		arg.BeforePostedAt,
+		arg.BeforeSeq,
+		arg.Scope,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -414,6 +460,8 @@ func (q *Queries) ListNotes(ctx context.Context, arg ListNotesParams) ([]Note, e
 			&i.ArchivedCard,
 			&i.RecordID,
 			&i.AttachmentCount,
+			&i.PostedAt,
+			&i.Origin,
 		); err != nil {
 			return nil, err
 		}
@@ -444,11 +492,50 @@ func (q *Queries) SaveRecordSnapshot(ctx context.Context, arg SaveRecordSnapshot
 	return err
 }
 
+const syncRecordNote = `-- name: SyncRecordNote :one
+INSERT INTO notes (id, owner_id, link_kind, record_id, posted_at, origin)
+VALUES ($1, $2, $3, $4, $5, 'budget')
+ON CONFLICT (owner_id, link_kind, record_id) WHERE record_id IS NOT NULL
+DO UPDATE SET posted_at = EXCLUDED.posted_at, updated_at = now()
+WHERE (notes.posted_at AT TIME ZONE $6::text)::date <> $7::date
+RETURNING (xmax = 0) AS inserted
+`
+
+type SyncRecordNoteParams struct {
+	ID         uuid.UUID          `json:"id"`
+	OwnerID    uuid.UUID          `json:"owner_id"`
+	LinkKind   pgtype.Text        `json:"link_kind"`
+	RecordID   pgtype.UUID        `json:"record_id"`
+	PostedAt   pgtype.Timestamptz `json:"posted_at"`
+	Tz         string             `json:"tz"`
+	RecordDate pgtype.Date        `json:"record_date"`
+}
+
+// Gives a budget record its note at posted_at, unless it has one. An
+// existing note moves to posted_at only when its local date (in tz) isn't
+// the record's date, so it keeps its time of day until the record is
+// re-dated. inserted tells a new note from a moved one; no row means the
+// note was already in place.
+func (q *Queries) SyncRecordNote(ctx context.Context, arg SyncRecordNoteParams) (bool, error) {
+	row := q.db.QueryRow(ctx, syncRecordNote,
+		arg.ID,
+		arg.OwnerID,
+		arg.LinkKind,
+		arg.RecordID,
+		arg.PostedAt,
+		arg.Tz,
+		arg.RecordDate,
+	)
+	var inserted bool
+	err := row.Scan(&inserted)
+	return inserted, err
+}
+
 const updateNote = `-- name: UpdateNote :one
 UPDATE notes
 SET body = $3, archived_at = $4, archived_card = $5, updated_at = now()
 WHERE id = $1 AND owner_id = $2
-RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id, attachment_count
+RETURNING id, owner_id, seq, body, archived_at, created_at, updated_at, link_kind, reminder_id, card_id, snapshot, archived_card, record_id, attachment_count, posted_at, origin
 `
 
 type UpdateNoteParams struct {
@@ -483,6 +570,8 @@ func (q *Queries) UpdateNote(ctx context.Context, arg UpdateNoteParams) (Note, e
 		&i.ArchivedCard,
 		&i.RecordID,
 		&i.AttachmentCount,
+		&i.PostedAt,
+		&i.Origin,
 	)
 	return i, err
 }

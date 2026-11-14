@@ -43,6 +43,10 @@ var (
 	// note whose snapshot coreban keeps itself (a reminder or card), or a
 	// plain note, which has none.
 	ErrTakesNoSnapshot = errors.New("note takes no snapshot from the web")
+	// ErrPostedFromFeed is returned when deleting a budget record's note
+	// that was posted from the Feed: it stays, showing the record's
+	// snapshot once the web finds the record gone (ADR-0003).
+	ErrPostedFromFeed = errors.New("note was posted from the feed")
 )
 
 // errBlank is CleanText's answer for blank text, which a note with
@@ -71,8 +75,14 @@ type Note struct {
 	// ArchivedAt is set while the note is archived: collapsed in the feed,
 	// kept, and still in its place.
 	ArchivedAt *time.Time `json:"archived_at"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	// PostedAt is where the note sits in the feed: when it was posted, or
+	// for a budget record's note the record's date (ADR-0005).
+	PostedAt time.Time `json:"posted_at"`
+	// Origin is "feed" for a note posted from the Feed, "budget" for one
+	// the web's sync made for a budget record.
+	Origin    string    `json:"origin"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Link is the one record a note shows: live while it exists, and its last
@@ -113,20 +123,53 @@ type Page struct {
 	Older *string `json:"older"`
 }
 
-// Cursor is a position in the feed; a page asked for "before" it holds
-// only notes posted earlier.
-type Cursor int64
+// Cursor is a position in the feed, the place of the oldest note on a
+// page; a page asked for "before" it holds only notes placed earlier.
+type Cursor struct {
+	PostedAt time.Time
+	Seq      int64
+}
 
-func (c Cursor) String() string { return strconv.FormatInt(int64(c), 10) }
+func (c Cursor) String() string {
+	return strconv.FormatInt(c.PostedAt.UnixMicro(), 10) + "." + strconv.FormatInt(c.Seq, 10)
+}
 
 // ParseCursor reads a cursor from a page's Older value.
 func ParseCursor(s string) (Cursor, error) {
-	n, err := strconv.ParseInt(s, 10, 64)
-	if err != nil || n <= 0 {
-		return 0, errors.New("invalid cursor")
+	at, seq, ok := strings.Cut(s, ".")
+	micros, err1 := strconv.ParseInt(at, 10, 64)
+	n, err2 := strconv.ParseInt(seq, 10, 64)
+	if !ok || err1 != nil || err2 != nil || n <= 0 {
+		return Cursor{}, errors.New("invalid cursor")
 	}
-	return Cursor(n), nil
+	return Cursor{PostedAt: time.UnixMicro(micros), Seq: n}, nil
 }
+
+// Scope narrows the feed: ScopeAll shows every note, ScopeBudget only
+// expense and income notes, ScopeNotes everything else.
+const (
+	ScopeAll    = ""
+	ScopeBudget = "budget"
+	ScopeNotes  = "notes"
+)
+
+// Origins of a note.
+const (
+	OriginFeed   = "feed"
+	OriginBudget = "budget"
+)
+
+// SyncRecord is one budget record the web asks to have a note: Date is
+// the record's date, PostedAt where a new note for it goes.
+type SyncRecord struct {
+	Kind     string
+	ID       uuid.UUID
+	Date     time.Time
+	PostedAt time.Time
+}
+
+// MaxSyncRecords is the most records one sync request may name.
+const MaxSyncRecords = 1000
 
 // CleanText trims a note's text and reports why it can't be posted, if
 // it can't: it is blank, or longer than MaxTextLength characters.
