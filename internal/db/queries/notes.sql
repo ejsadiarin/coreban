@@ -11,7 +11,8 @@ RETURNING *;
 -- name: ListNotes :many
 -- One page of the feed going back in time: the newest notes placed before
 -- the cursor (posted_at, then seq), newest first. scope narrows it to
--- 'budget' (expense and income notes) or 'notes' (everything else). The
+-- 'budget' (expense and income notes) or 'notes' (everything else).
+-- Archived notes are left out unless with_archived. The
 -- caller asks for one more than it shows to learn whether an older page
 -- exists.
 SELECT *
@@ -21,6 +22,7 @@ WHERE owner_id = sqlc.arg(owner_id)
        OR (posted_at, seq) < (sqlc.narg(before_posted_at)::timestamptz, sqlc.narg(before_seq)::bigint))
   AND (sqlc.narg(scope)::text IS NULL
        OR (sqlc.narg(scope)::text = 'budget') = COALESCE(link_kind IN ('expense', 'income'), false))
+  AND (sqlc.arg(with_archived)::boolean OR archived_at IS NULL)
 ORDER BY posted_at DESC, seq DESC
 LIMIT sqlc.arg(row_limit);
 

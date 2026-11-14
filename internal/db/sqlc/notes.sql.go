@@ -413,8 +413,9 @@ WHERE owner_id = $1
        OR (posted_at, seq) < ($2::timestamptz, $3::bigint))
   AND ($4::text IS NULL
        OR ($4::text = 'budget') = COALESCE(link_kind IN ('expense', 'income'), false))
+  AND ($5::boolean OR archived_at IS NULL)
 ORDER BY posted_at DESC, seq DESC
-LIMIT $5
+LIMIT $6
 `
 
 type ListNotesParams struct {
@@ -422,12 +423,14 @@ type ListNotesParams struct {
 	BeforePostedAt pgtype.Timestamptz `json:"before_posted_at"`
 	BeforeSeq      pgtype.Int8        `json:"before_seq"`
 	Scope          pgtype.Text        `json:"scope"`
+	WithArchived   bool               `json:"with_archived"`
 	RowLimit       int32              `json:"row_limit"`
 }
 
 // One page of the feed going back in time: the newest notes placed before
 // the cursor (posted_at, then seq), newest first. scope narrows it to
-// 'budget' (expense and income notes) or 'notes' (everything else). The
+// 'budget' (expense and income notes) or 'notes' (everything else).
+// Archived notes are left out unless with_archived. The
 // caller asks for one more than it shows to learn whether an older page
 // exists.
 func (q *Queries) ListNotes(ctx context.Context, arg ListNotesParams) ([]Note, error) {
@@ -436,6 +439,7 @@ func (q *Queries) ListNotes(ctx context.Context, arg ListNotesParams) ([]Note, e
 		arg.BeforePostedAt,
 		arg.BeforeSeq,
 		arg.Scope,
+		arg.WithArchived,
 		arg.RowLimit,
 	)
 	if err != nil {

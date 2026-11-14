@@ -209,7 +209,7 @@ func TestEditingANotesText(t *testing.T) {
 	}
 }
 
-func TestArchivedNotesStayInPlaceFlaggedAndCanBeRestored(t *testing.T) {
+func TestArchivedNotesLeaveTheFeedUntilAskedForAndCanBeRestored(t *testing.T) {
 	o, _ := newOwner(t)
 	o.post("one")
 	mid := o.post("two")
@@ -222,12 +222,18 @@ func TestArchivedNotesStayInPlaceFlaggedAndCanBeRestored(t *testing.T) {
 	if got := decode[note](t, rec); got.ArchivedAt == nil {
 		t.Errorf("archive response = %+v, want archived_at set", got)
 	}
-	f := o.feed("")
+	if f := o.feed(""); fmt.Sprint(texts(f.Notes)) != "[one three]" {
+		t.Fatalf("feed = %q, want the archived note hidden", texts(f.Notes))
+	}
+	f := o.feed("?archived=include")
 	if fmt.Sprint(texts(f.Notes)) != "[one two three]" {
-		t.Fatalf("feed = %q, want the archived note kept in place", texts(f.Notes))
+		t.Fatalf("feed with archived = %q, want the archived note in its place", texts(f.Notes))
 	}
 	if f.Notes[1].ArchivedAt == nil || f.Notes[0].ArchivedAt != nil || f.Notes[2].ArchivedAt != nil {
 		t.Errorf("only the middle note should be flagged archived: %+v", f.Notes)
+	}
+	if rec := o.do(http.MethodGet, "/api/coreban/notes?archived=yes", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("unknown archived value: status = %d, want 400", rec.Code)
 	}
 
 	// An archived note's text can't be edited until it is restored.
@@ -242,8 +248,8 @@ func TestArchivedNotesStayInPlaceFlaggedAndCanBeRestored(t *testing.T) {
 	if got := decode[note](t, rec); got.ArchivedAt != nil || got.Text != "two" {
 		t.Errorf("restored = %+v", got)
 	}
-	if f := o.feed(""); f.Notes[1].ArchivedAt != nil {
-		t.Errorf("restored note still flagged: %+v", f.Notes[1])
+	if f := o.feed(""); len(f.Notes) != 3 || f.Notes[1].ArchivedAt != nil {
+		t.Errorf("restored note not back in place: %+v", f.Notes)
 	}
 }
 

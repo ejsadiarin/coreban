@@ -40,7 +40,8 @@ func (h *Handler) Mount(r chi.Router) {
 
 // feed answers one page of the feed: ?limit= notes (default
 // DefaultPageSize, at most MaxPageSize) before the ?before= cursor, within
-// ?only= (budget or notes; all when absent).
+// ?only= (budget or notes; all when absent). Archived notes come only with
+// ?archived=include (ADR-0006).
 func (h *Handler) feed(w http.ResponseWriter, r *http.Request) {
 	owner, ok := helper.ResolveTargetUser(w, r)
 	if !ok {
@@ -70,8 +71,17 @@ func (h *Handler) feed(w http.ResponseWriter, r *http.Request) {
 		helper.RespondErrorJSON(w, http.StatusBadRequest, `only must be "budget" or "notes"`)
 		return
 	}
+	withArchived := false
+	switch q.Get("archived") {
+	case "":
+	case "include":
+		withArchived = true
+	default:
+		helper.RespondErrorJSON(w, http.StatusBadRequest, `archived must be "include"`)
+		return
+	}
 	caller, _ := auth.UserIDFromContext(r.Context())
-	p, err := h.Store.Feed(r.Context(), owner, before, scope, size, owner == caller)
+	p, err := h.Store.Feed(r.Context(), owner, before, scope, withArchived, size, owner == caller)
 	if err != nil {
 		helper.RespondErrorJSON(w, http.StatusInternalServerError, "failed to load the feed")
 		return

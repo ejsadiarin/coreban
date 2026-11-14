@@ -114,7 +114,8 @@ type Querier interface {
 	ListNoteReminders(ctx context.Context, arg ListNoteRemindersParams) ([]ListNoteRemindersRow, error)
 	// One page of the feed going back in time: the newest notes placed before
 	// the cursor (posted_at, then seq), newest first. scope narrows it to
-	// 'budget' (expense and income notes) or 'notes' (everything else). The
+	// 'budget' (expense and income notes) or 'notes' (everything else).
+	// Archived notes are left out unless with_archived. The
 	// caller asks for one more than it shows to learn whether an older page
 	// exists.
 	ListNotes(ctx context.Context, arg ListNotesParams) ([]Note, error)

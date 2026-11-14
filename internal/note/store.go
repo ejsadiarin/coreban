@@ -134,11 +134,12 @@ const uniqueViolation = "23505"
 
 // Feed returns one page of the owner's feed: the newest size notes placed
 // before the cursor (or the newest of all, with none), oldest first, within
-// scope (ScopeAll, ScopeBudget or ScopeNotes). Links to attachments are
+// scope (ScopeAll, ScopeBudget or ScopeNotes). Archived notes are left out
+// unless withArchived (ADR-0006). Links to attachments are
 // signed only with links set: an admin's targeted read of another owner
 // sees that they exist, never the files.
-func (s *Store) Feed(ctx context.Context, owner uuid.UUID, before *Cursor, scope string, size int, links bool) (Page, error) {
-	params := dbgen.ListNotesParams{OwnerID: owner, RowLimit: int32(size + 1)}
+func (s *Store) Feed(ctx context.Context, owner uuid.UUID, before *Cursor, scope string, withArchived bool, size int, links bool) (Page, error) {
+	params := dbgen.ListNotesParams{OwnerID: owner, RowLimit: int32(size + 1), WithArchived: withArchived}
 	if before != nil {
 		params.BeforePostedAt = pgtype.Timestamptz{Time: before.PostedAt, Valid: true}
 		params.BeforeSeq = pgtype.Int8{Int64: before.Seq, Valid: true}
