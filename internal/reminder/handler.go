@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/ejsadiarin/coreban/internal/auth"
 	dbgen "github.com/ejsadiarin/coreban/internal/db/sqlc"
 	"github.com/ejsadiarin/coreban/internal/feedlink"
 	"github.com/ejsadiarin/coreban/internal/helper"
@@ -50,16 +51,17 @@ func (h *Handler) changed() {
 	}
 }
 
-// ownerView loads how the owner sees their reminders: their timezone,
-// and whether they have a notification target.
+// ownerView loads how the owner sees their reminders: their timezone (the
+// one the gateway asserts in the request's token), and whether they have a
+// notification target.
 func (h *Handler) ownerView(ctx context.Context, owner uuid.UUID) (view, error) {
+	loc, err := auth.LocationFromContext(ctx)
+	if err != nil {
+		return view{}, fmt.Errorf("owner timezone: %w", err)
+	}
 	s, err := h.Settings.Get(ctx, owner)
 	if err != nil {
 		return view{}, err
-	}
-	loc, err := time.LoadLocation(s.Timezone)
-	if err != nil {
-		return view{}, fmt.Errorf("owner timezone %q: %w", s.Timezone, err)
 	}
 	return view{loc: loc, noTarget: s.NtfyTopic == nil, now: h.Now()}, nil
 }

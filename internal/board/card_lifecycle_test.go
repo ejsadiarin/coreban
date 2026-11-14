@@ -42,17 +42,17 @@ func (o owner) archived(b board) []string {
 	return titles
 }
 
-func (o owner) inZone(tz string) {
-	o.t.Helper()
-	rec := o.do(http.MethodPut, "/api/coreban/settings", map[string]any{"ntfy_topic": nil, "timezone": tz})
-	if rec.Code != http.StatusOK {
-		o.t.Fatalf("set timezone: status = %d, body %s", rec.Code, rec.Body)
-	}
+// inZone is the owner after setting their timezone to tz at the gateway:
+// their requests carry it in the token.
+func (o owner) inZone(tz string) owner {
+	id := o.id
+	id.Timezone = tz
+	return as(o.t, id)
 }
 
 func TestADueIsADateOrAMomentAndComesBackAsWhichItWas(t *testing.T) {
 	o, _ := newOwner(t)
-	o.inZone("Asia/Manila")
+	o = o.inZone("Asia/Manila")
 	b := o.create("Homelab")
 	k := o.createCard(b, b.Columns[0], "Renew the cert")
 
