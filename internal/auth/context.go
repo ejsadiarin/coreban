@@ -2,6 +2,10 @@ package auth
 
 import (
 	"context"
+	"time"
+	// The runtime image ships without zoneinfo; embed it so every zone the
+	// gateway asserts resolves the same everywhere.
+	_ "time/tzdata"
 
 	"github.com/google/uuid"
 )
@@ -12,6 +16,7 @@ const (
 	userIDKey contextKey = "coreban-user-id"
 	scopesKey contextKey = "coreban-scopes"
 	actAsKey  contextKey = "coreban-act-as"
+	tzKey     contextKey = "coreban-tz"
 )
 
 // WithUserID stores the verified user identity and scopes in the context.
@@ -54,4 +59,23 @@ func HasScope(ctx context.Context, scope string) bool {
 		}
 	}
 	return false
+}
+
+// WithTimezone stores the gateway-asserted IANA zone of the user the
+// request is about (the token's tz claim). Only the verifier middleware may
+// call it; "" means the token carried none.
+func WithTimezone(ctx context.Context, tz string) context.Context {
+	return context.WithValue(ctx, tzKey, tz)
+}
+
+// LocationFromContext returns the zone the request's times are read and
+// shown in: the token's tz claim, or UTC for a token minted before the
+// gateway carried one. A claim no zone database knows is an error, never
+// a guess.
+func LocationFromContext(ctx context.Context) (*time.Location, error) {
+	tz, _ := ctx.Value(tzKey).(string)
+	if tz == "" {
+		return time.UTC, nil
+	}
+	return time.LoadLocation(tz)
 }
