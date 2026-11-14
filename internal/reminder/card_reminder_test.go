@@ -116,8 +116,7 @@ func TestOnlyYourOwnCardsTakeReminders(t *testing.T) {
 }
 
 func TestRemindMeAtDueUsesTheCardsDue(t *testing.T) {
-	o, _ := newOwner(t)
-	o.setTarget(nil, "Asia/Manila")
+	o := newOwnerIn(t, "Asia/Manila")
 	b := o.board()
 	k := o.card(b, "Ship the release")
 

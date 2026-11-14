@@ -193,26 +193,27 @@ DELETE {{host}}/api/coreban/boards/PASTE_BOARD_UUID_HERE/labels/PASTE_LABEL_UUID
 
 # ─── Settings ──────────────────────────────────────────────────────────────
 # The owner's notification target (an ntfy topic name under coreban-, never
-# a URL) and IANA timezone. Defaults: no topic, UTC.
+# a URL). Default: no topic. The timezone is the gateway's
+# (PUT /api/users/{id}/timezone there); a "timezone" sent here is ignored.
 
 ### Get my settings ("saved": false means these are the defaults, nothing chosen yet)
 
 GET {{host}}/api/coreban/settings
 
 ### Save my settings (ntfy_topic null or "" clears the target)
-# 400 for a URL, a missing coreban- prefix, or an unknown timezone;
+# 400 for a URL or a missing coreban- prefix;
 # 409 when another owner already uses the topic.
 
 PUT {{host}}/api/coreban/settings
 Content-Type: application/json
 
 {
-  "ntfy_topic": "coreban-ejs-phone",
-  "timezone": "Asia/Manila"
+  "ntfy_topic": "coreban-ejs-phone"
 }
 
 # ─── Reminders ─────────────────────────────────────────────────────────────
-# Times come back in your timezone (Settings). Nothing is sent while you have
+# Times come back in your timezone (the gateway's, from the token's tz
+# claim). Nothing is sent while you have
 # no notification target: each pending reminder says
 # "paused": "no_notification_target".
 

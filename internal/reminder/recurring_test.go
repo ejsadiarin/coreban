@@ -6,8 +6,6 @@ import (
 	"slices"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 func (o owner) createScheduled(message string, sched map[string]any) item {
@@ -49,8 +47,7 @@ func parseNext(t *testing.T, r item) time.Time {
 }
 
 func TestEachPresetShowsItsNextFiringInTheOwnersTimezone(t *testing.T) {
-	o, _ := newOwner(t)
-	o.setTarget(nil, "Asia/Manila")
+	o := newOwnerIn(t, "Asia/Manila")
 	manila := mustLoad(t, "Asia/Manila")
 	now := time.Now()
 
@@ -242,18 +239,13 @@ func TestMissedRecurringOccurrencesAreSkippedNotReplayed(t *testing.T) {
 	}
 }
 
-func TestChangingTheOwnersTimezoneReanchorsFutureOccurrences(t *testing.T) {
-	o, _ := newOwner(t)
-	topic := "coreban-" + uuid.NewString()[:12]
-	o.setTarget(topic, "UTC")
+func TestADailyReminderFiresAtItsTimeInTheZoneSetAtTheGateway(t *testing.T) {
+	o, topic := subscribed(t, "UTC")
 	o.createScheduled("journal", daily("07:00"))
 
-	o.setTarget(topic, "Asia/Manila")
-	next := parseNext(t, o.list()[0])
-	if _, off := next.Zone(); off != 8*3600 || next.Hour() != 7 {
-		t.Errorf("next after moving to Manila = %s, want 07:00+08:00", next.Format(time.RFC3339))
-	}
-
+	// The owner sets Manila at the gateway and makes no request to coreban
+	// before the dispatcher's next pass.
+	moved := o.inZone("Asia/Manila")
 	n := &inbox{}
 	manila := mustLoad(t, "Asia/Manila")
 	at := time.Date(2027, 4, 1, 7, 0, 0, 0, manila)
@@ -261,6 +253,12 @@ func TestChangingTheOwnersTimezoneReanchorsFutureOccurrences(t *testing.T) {
 	tickAt(t, context.Background(), n, at)
 	if got := sends(n, topic, manila); !slices.Equal(got, []string{"Thu 2027-04-01 07:00 PST"}) {
 		t.Errorf("sends = %v, want 07:00 Manila", got)
+	}
+
+	// Their next request shows it in Manila too.
+	next := parseNext(t, moved.list()[0])
+	if _, off := next.Zone(); off != 8*3600 || next.Hour() != 7 {
+		t.Errorf("next after moving to Manila = %s, want 07:00+08:00", next.Format(time.RFC3339))
 	}
 }
 
@@ -287,7 +285,7 @@ func TestMovingToAZoneWithTheSameOffsetRightAfterASendDoesNotRepeatIt(t *testing
 	at := time.Date(2027, 5, 3, 7, 0, 0, 0, manila)
 	tickAt(t, context.Background(), n, at)
 
-	o.setTarget(topic, "Asia/Singapore") // also +08:00
+	o.inZone("Asia/Singapore") // also +08:00
 	tickAt(t, context.Background(), n, at.Add(30*time.Second))
 	if got := sends(n, topic, manila); !slices.Equal(got, []string{"Mon 2027-05-03 07:00 PST"}) {
 		t.Errorf("sends = %v, want the 07:00 once", got)

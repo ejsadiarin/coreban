@@ -334,6 +334,39 @@ func TestMiddlewareSubLessTokenRejected(t *testing.T) {
 	}
 }
 
+// zoneOf runs token through the middleware and returns the zone the handler
+// sees, and the status.
+func zoneOf(t *testing.T, v *Verifier, token string) (string, int) {
+	t.Helper()
+	var zone string
+	rec := httptest.NewRecorder()
+	v.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		loc, err := LocationFromContext(r.Context())
+		if err != nil {
+			t.Fatalf("location: %v", err)
+		}
+		zone = loc.String()
+		w.WriteHeader(http.StatusOK)
+	})).ServeHTTP(rec, bearerReq(token))
+	return zone, rec.Code
+}
+
+func TestTheOwnersZoneComesFromTheTokensTzClaim(t *testing.T) {
+	priv := mustKey(t)
+	h := newJWKSHarness(t, map[string]ed25519.PublicKey{"2026-09-a": priv.Public().(ed25519.PublicKey)})
+	v := newTestVerifier(t, h, nil)
+
+	manila := signToken(t, priv, "2026-09-a", func(c *Claims) { c.Tz = "Asia/Manila" })
+	if zone, code := zoneOf(t, v, manila); code != http.StatusOK || zone != "Asia/Manila" {
+		t.Errorf("tz claim Asia/Manila: status %d, zone %q; want 200 Asia/Manila", code, zone)
+	}
+	// Minted before the gateway carried tz (the gateway's ADR-0005): UTC.
+	old := signToken(t, priv, "2026-09-a", nil)
+	if zone, code := zoneOf(t, v, old); code != http.StatusOK || zone != "UTC" {
+		t.Errorf("no tz claim: status %d, zone %q; want 200 UTC", code, zone)
+	}
+}
+
 func TestNewVerifierUnreachableJWKRFailsClosed(t *testing.T) {
 	_, err := NewVerifier(Config{
 		Issuer:   testIssuer,

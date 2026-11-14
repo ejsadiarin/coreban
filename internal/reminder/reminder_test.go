@@ -45,12 +45,13 @@ type item struct {
 
 // owner is one caller driving the API with a fixed injected identity.
 type owner struct {
-	t *testing.T
-	h http.Handler
+	t  *testing.T
+	h  http.Handler
+	id testharness.Identity
 }
 
 func as(t *testing.T, id testharness.Identity) owner {
-	return owner{t: t, h: testharness.Router(t, id)}
+	return owner{t: t, h: testharness.Router(t, id), id: id}
 }
 
 func identity(id uuid.UUID) testharness.Identity {
@@ -60,6 +61,23 @@ func identity(id uuid.UUID) testharness.Identity {
 func newOwner(t *testing.T) (owner, uuid.UUID) {
 	id := uuid.New()
 	return as(t, identity(id)), id
+}
+
+// newOwnerIn is a new owner whose gateway asserts tz as their timezone.
+func newOwnerIn(t *testing.T, tz string) owner {
+	o, _ := newOwner(t)
+	return o.inZone(tz)
+}
+
+// inZone is the owner after setting their timezone to tz at the gateway:
+// the dispatcher's lookups answer it, and their requests carry it in the
+// token.
+func (o owner) inZone(tz string) owner {
+	o.t.Helper()
+	testharness.FakeGateway(o.t).SetZone(o.id.Owner, tz)
+	id := o.id
+	id.Timezone = tz
+	return as(o.t, id)
 }
 
 func (o owner) do(method, path string, body any) *httptest.ResponseRecorder {
@@ -97,10 +115,10 @@ func once(at string) map[string]any {
 	return map[string]any{"kind": "once", "at": at}
 }
 
-// setTarget saves the owner's notification target and timezone.
-func (o owner) setTarget(topic any, tz string) {
+// setTarget saves the owner's notification target.
+func (o owner) setTarget(topic any) {
 	o.t.Helper()
-	expect(o.t, o.do(http.MethodPut, "/api/coreban/settings", map[string]any{"ntfy_topic": topic, "timezone": tz}), http.StatusOK)
+	expect(o.t, o.do(http.MethodPut, "/api/coreban/settings", map[string]any{"ntfy_topic": topic}), http.StatusOK)
 }
 
 func (o owner) create(message string, at string) item {
@@ -126,8 +144,7 @@ func future(loc *time.Location, d time.Duration) time.Time {
 func wall(t time.Time) string { return t.Format("2006-01-02T15:04") }
 
 func TestAOneOffIsListedWithItsNextFiringInTheOwnersTimezone(t *testing.T) {
-	o, _ := newOwner(t)
-	o.setTarget(nil, "Asia/Manila")
+	o := newOwnerIn(t, "Asia/Manila")
 	manila, _ := time.LoadLocation("Asia/Manila")
 	at := future(manila, 48*time.Hour)
 
@@ -154,8 +171,7 @@ func TestAOneOffIsListedWithItsNextFiringInTheOwnersTimezone(t *testing.T) {
 }
 
 func TestAnInstantWithAnOffsetIsKeptAsThatInstant(t *testing.T) {
-	o, _ := newOwner(t)
-	o.setTarget(nil, "Asia/Manila")
+	o := newOwnerIn(t, "Asia/Manila")
 	at := time.Now().Add(72 * time.Hour).UTC().Truncate(time.Second)
 
 	r := o.create("ship it", at.Format(time.RFC3339))
@@ -284,7 +300,7 @@ func TestTheListSaysWhyNothingWillBeSentWithoutANotificationTarget(t *testing.T)
 	if r.Paused == nil || *r.Paused != "no_notification_target" {
 		t.Errorf("paused = %v, want no_notification_target", r.Paused)
 	}
-	o.setTarget("coreban-"+uuid.NewString()[:8], "UTC")
+	o.setTarget("coreban-" + uuid.NewString()[:8])
 	if got := o.list(); got[0].Paused != nil {
 		t.Errorf("paused = %v after setting a target, want none", *got[0].Paused)
 	}

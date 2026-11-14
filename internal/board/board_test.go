@@ -27,12 +27,13 @@ type board struct {
 
 // owner is one caller driving the API with a fixed injected identity.
 type owner struct {
-	t *testing.T
-	h http.Handler
+	t  *testing.T
+	h  http.Handler
+	id testharness.Identity
 }
 
 func as(t *testing.T, id testharness.Identity) owner {
-	return owner{t: t, h: testharness.Router(t, id)}
+	return owner{t: t, h: testharness.Router(t, id), id: id}
 }
 
 func newOwner(t *testing.T) (owner, uuid.UUID) {

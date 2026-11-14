@@ -1,6 +1,6 @@
 // Package settings serves each owner's notification target (an ntfy topic
-// on the homelab's own ntfy server) and the timezone their schedules are
-// read in.
+// on the homelab's own ntfy server). Their timezone is not a setting here:
+// the gateway owns it (coregateway ADR-0005).
 package settings
 
 import (
@@ -15,16 +15,12 @@ import (
 
 // Settings is one owner's notification settings. A nil NtfyTopic means the
 // owner has no notification target, so their reminders are not sent. Saved
-// says the owner has saved their own; until then these are the defaults,
-// which lets a client tell a chosen UTC from an unset one. Writes ignore it.
+// says the owner has saved their own; until then these are the defaults
+// (no target). Writes ignore it, and a timezone a client still sends.
 type Settings struct {
 	NtfyTopic *string `json:"ntfy_topic"`
-	Timezone  string  `json:"timezone"`
 	Saved     bool    `json:"saved"`
 }
-
-// defaults are an owner's settings until they save their own.
-var defaults = Settings{Timezone: "UTC"}
 
 // TopicPrefix confines owners to coreban's own topics on the homelab ntfy
 // server, where coreban's token may write to coreban-* and nothing else.
@@ -71,14 +67,11 @@ func normalize(v Settings) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	tz := strings.TrimSpace(v.Timezone)
-	if !ValidTimezone(tz) {
-		return Settings{}, invalid("timezone must be an IANA zone such as Asia/Manila")
-	}
-	return Settings{NtfyTopic: topic, Timezone: tz}, nil
+	return Settings{NtfyTopic: topic}, nil
 }
 
-// ValidTimezone reports whether tz names an IANA zone. "Local" is refused:
+// ValidTimezone reports whether tz names an IANA zone, for a request that
+// names one (the Feed's budget sync). "Local" is refused:
 // it means the server's zone, not the owner's. So are the host zoneinfo's
 // extras (posix/, right/, Factory, posixrules), which LoadLocation finds on
 // a dev box but the embedded tzdata in the image does not have.

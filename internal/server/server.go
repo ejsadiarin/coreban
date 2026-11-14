@@ -43,7 +43,7 @@ func New(pool *pgxpool.Pool, authenticate func(http.Handler) http.Handler) *Serv
 	return &Server{
 		Pool:         pool,
 		authenticate: authenticate,
-		Boards:       &board.Handler{Store: &board.Store{Pool: pool}, Settings: settingsStore},
+		Boards:       &board.Handler{Store: &board.Store{Pool: pool}},
 		Settings:     &settings.Handler{Store: settingsStore},
 		Reminders:    reminders,
 		// Linked reminders render as the Reminders page shows them, with

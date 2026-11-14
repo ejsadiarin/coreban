@@ -10,7 +10,8 @@ import (
 	"github.com/ejsadiarin/coreban/internal/helper"
 )
 
-// maxSettingsBody bounds a settings request: a topic name and a zone name.
+// maxSettingsBody bounds a settings request: a topic name (and the zone
+// name an older client still sends, which is ignored).
 const maxSettingsBody = 4 << 10
 
 // Handler serves the owner's settings. Reads resolve the owner through a
