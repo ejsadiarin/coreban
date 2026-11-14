@@ -90,7 +90,7 @@ type Querier interface {
 	GetOwnedCard(ctx context.Context, arg GetOwnedCardParams) (GetOwnedCardRow, error)
 	// Settings are keyed by owner_id: an owner only ever reads or writes their
 	// own row.
-	GetOwnerSettings(ctx context.Context, ownerID uuid.UUID) (GetOwnerSettingsRow, error)
+	GetOwnerSettings(ctx context.Context, ownerID uuid.UUID) (pgtype.Text, error)
 	GetReminder(ctx context.Context, arg GetReminderParams) (GetReminderRow, error)
 	LabelOnBoard(ctx context.Context, arg LabelOnBoardParams) (uuid.UUID, error)
 	// Converts one of the owner's live plain notes in place: it keeps its place

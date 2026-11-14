@@ -27,16 +27,16 @@ type Store struct {
 
 // Get returns the owner's settings, or the defaults if they have saved none.
 func (s *Store) Get(ctx context.Context, owner uuid.UUID) (Settings, error) {
-	row, err := dbgen.New(s.Pool).GetOwnerSettings(ctx, owner)
+	topic, err := dbgen.New(s.Pool).GetOwnerSettings(ctx, owner)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return defaults, nil
+		return Settings{}, nil
 	}
 	if err != nil {
 		return Settings{}, err
 	}
-	out := Settings{Timezone: row.Timezone, Saved: true}
-	if row.NtfyTopic.Valid {
-		out.NtfyTopic = &row.NtfyTopic.String
+	out := Settings{Saved: true}
+	if topic.Valid {
+		out.NtfyTopic = &topic.String
 	}
 	return out, nil
 }
@@ -48,7 +48,7 @@ func (s *Store) Put(ctx context.Context, owner uuid.UUID, v Settings) error {
 		topic = pgtype.Text{String: *v.NtfyTopic, Valid: true}
 	}
 	err := dbgen.New(s.Pool).PutOwnerSettings(ctx, dbgen.PutOwnerSettingsParams{
-		OwnerID: owner, NtfyTopic: topic, Timezone: v.Timezone,
+		OwnerID: owner, NtfyTopic: topic,
 	})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {

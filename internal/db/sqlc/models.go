@@ -131,7 +131,6 @@ type NoteReminder struct {
 type OwnerSetting struct {
 	OwnerID   uuid.UUID          `json:"owner_id"`
 	NtfyTopic pgtype.Text        `json:"ntfy_topic"`
-	Timezone  string             `json:"timezone"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 

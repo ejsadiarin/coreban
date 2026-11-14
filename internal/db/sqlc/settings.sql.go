@@ -14,41 +14,34 @@ import (
 
 const getOwnerSettings = `-- name: GetOwnerSettings :one
 
-SELECT ntfy_topic, timezone
+SELECT ntfy_topic
 FROM owner_settings
 WHERE owner_id = $1
 `
 
-type GetOwnerSettingsRow struct {
-	NtfyTopic pgtype.Text `json:"ntfy_topic"`
-	Timezone  string      `json:"timezone"`
-}
-
 // Settings are keyed by owner_id: an owner only ever reads or writes their
 // own row.
-func (q *Queries) GetOwnerSettings(ctx context.Context, ownerID uuid.UUID) (GetOwnerSettingsRow, error) {
+func (q *Queries) GetOwnerSettings(ctx context.Context, ownerID uuid.UUID) (pgtype.Text, error) {
 	row := q.db.QueryRow(ctx, getOwnerSettings, ownerID)
-	var i GetOwnerSettingsRow
-	err := row.Scan(&i.NtfyTopic, &i.Timezone)
-	return i, err
+	var ntfy_topic pgtype.Text
+	err := row.Scan(&ntfy_topic)
+	return ntfy_topic, err
 }
 
 const putOwnerSettings = `-- name: PutOwnerSettings :exec
-INSERT INTO owner_settings (owner_id, ntfy_topic, timezone)
-VALUES ($1, $2, $3)
+INSERT INTO owner_settings (owner_id, ntfy_topic)
+VALUES ($1, $2)
 ON CONFLICT (owner_id) DO UPDATE
 SET ntfy_topic = EXCLUDED.ntfy_topic,
-    timezone = EXCLUDED.timezone,
     updated_at = now()
 `
 
 type PutOwnerSettingsParams struct {
 	OwnerID   uuid.UUID   `json:"owner_id"`
 	NtfyTopic pgtype.Text `json:"ntfy_topic"`
-	Timezone  string      `json:"timezone"`
 }
 
 func (q *Queries) PutOwnerSettings(ctx context.Context, arg PutOwnerSettingsParams) error {
-	_, err := q.db.Exec(ctx, putOwnerSettings, arg.OwnerID, arg.NtfyTopic, arg.Timezone)
+	_, err := q.db.Exec(ctx, putOwnerSettings, arg.OwnerID, arg.NtfyTopic)
 	return err
 }

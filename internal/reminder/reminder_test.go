@@ -118,11 +118,7 @@ func once(at string) map[string]any {
 // setTarget saves the owner's notification target.
 func (o owner) setTarget(topic any) {
 	o.t.Helper()
-	tz := o.id.Timezone
-	if tz == "" {
-		tz = "UTC"
-	}
-	expect(o.t, o.do(http.MethodPut, "/api/coreban/settings", map[string]any{"ntfy_topic": topic, "timezone": tz}), http.StatusOK)
+	expect(o.t, o.do(http.MethodPut, "/api/coreban/settings", map[string]any{"ntfy_topic": topic}), http.StatusOK)
 }
 
 func (o owner) create(message string, at string) item {
