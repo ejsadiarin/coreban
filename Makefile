@@ -2,7 +2,7 @@
 -include .env
 export
 
-.PHONY: run build test test-unit test-integration migrate-up migrate-create sqlc sqlc-check docker-build
+.PHONY: run build test test-unit test-integration migrate-up migrate-status migrate-create sqlc sqlc-check docker-build
 
 run:
 	go run ./cmd/coreban
@@ -23,6 +23,10 @@ test-integration:
 # options=-c search_path=coreban). Run internal/db/bootstrap.sql once first.
 migrate-up:
 	go run ./cmd/coreban migrate
+
+# Lists applied and pending migrations on MIGRATION_URL. Needs the goose CLI.
+migrate-status:
+	@goose -dir internal/db/migrations postgres "$(MIGRATION_URL)" status
 
 # Needs the goose CLI: go install github.com/pressly/goose/v3/cmd/goose@latest
 migrate-create:
