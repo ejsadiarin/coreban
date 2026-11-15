@@ -127,7 +127,7 @@ type Identity struct {
 	// ActAs is the signed targeted-read target (uuid.Nil for none).
 	ActAs uuid.UUID
 	// Timezone is the token's tz claim: the zone of the user the request
-	// is about. Empty is a token without one, read as UTC.
+	// is about. Empty is a token without one: the zone last seen is used.
 	Timezone string
 }
 

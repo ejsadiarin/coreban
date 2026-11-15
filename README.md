@@ -96,9 +96,10 @@ Kanban boards and ntfy reminders, served as a downstream service behind
   owner per topic). Without a topic nothing is sent, and the reminder list
   says why.
 - The owner's timezone is the gateway's (coregateway ADR-0005), not a
-  coreban setting: requests read it from the internal token's `tz` claim
-  (no claim: UTC), and the reminder dispatcher looks it up from the
-  gateway.
+  coreban setting: requests read it from the internal token's `tz` claim.
+  coreban records the zone it last saw for each owner, and uses it where
+  there is no claim: a token from a gateway that doesn't send `tz` yet
+  (UTC if none was ever seen), and the reminder dispatcher.
 
 **Access**
 - Only the gateway's internal token (audience `coreban`) is accepted;
@@ -163,28 +164,14 @@ subscribe to, and a leaked `NTFY_TOKEN` cannot reach topics outside
 
 The dispatcher runs inside `coreban-api` when `NTFY_URL` is set. It sleeps
 until the next reminder's moment (or a create, reschedule, or settings
-save wakes it), and while anything is scheduled at most 5 minutes, so an
+save, or a request showing the owner in a new zone, wakes it), so an
 idle coreban leaves the database alone. Each occurrence goes out at most
 once (ADR-0002).
 
-Each pass looks up the timezone of every owner with something to send
-from the gateway (`GET /api/users/{id}/timezone` on `GATEWAY_URL`,
-reusing an answer for a minute), so a zone the owner saves at the gateway
-re-anchors their recurring reminders within minutes, with no request to
-coreban. `GATEWAY_API_KEY` is a gateway API key minted from an admin
-session with only the `coreban:admin` scope:
-
-```sh
-# as an admin, through the gateway
-curl -X POST "$GATEWAY/api/auth/keys" -H 'Content-Type: application/json' \
-  -d '{"label":"coreban-dispatcher","scopes":["coreban:admin"]}'   # → GATEWAY_API_KEY
-```
-
-If the lookup fails for an owner (gateway down, key revoked, any answer
-but `200`), that owner's pass is skipped and logged, never sent in a
-guessed zone, and retried in 30 seconds; other owners' reminders go out.
-Once it answers, a skipped one-off goes out late, and a recurring
-reminder carries on as below.
+The dispatcher has no token, so it reads each owner's timezone as the
+zone coreban last saw for them. A zone the owner changes at the gateway
+reaches it with their next request to coreban, which re-anchors their
+recurring reminders to the new zone.
 
 - **On time**: sent at its moment.
 - **Missed** (coreban was down, or the owner had no notification target):

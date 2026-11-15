@@ -27,23 +27,3 @@ func TestTheQuotaMattersOnlyWithABucket(t *testing.T) {
 		t.Errorf("a bucket with a quota: %v", err)
 	}
 }
-
-func TestSendingRemindersNeedsTheGatewayToLookUpTimezones(t *testing.T) {
-	c := Config{DatabaseURL: "postgres://x", ReminderCap: 1}
-	if err := c.ValidateServe(); err != nil {
-		t.Errorf("no ntfy, no gateway: %v, want it ignored (nothing is sent)", err)
-	}
-	c.NtfyURL, c.NtfyToken = "http://localhost:19080", "tk_x"
-	for _, gw := range []struct{ url, key string }{
-		{"", ""}, {"http://coregateway-api:8080", ""}, {"", "cgw_live_x"}, {"coregateway-api:8080", "cgw_live_x"},
-	} {
-		c.GatewayURL, c.GatewayAPIKey = gw.url, gw.key
-		if err := c.ValidateServe(); err == nil {
-			t.Errorf("ntfy with GATEWAY_URL %q, GATEWAY_API_KEY %q was accepted", gw.url, gw.key)
-		}
-	}
-	c.GatewayURL, c.GatewayAPIKey = "http://coregateway-api:8080", "cgw_live_x"
-	if err := c.ValidateServe(); err != nil {
-		t.Errorf("ntfy with the gateway: %v", err)
-	}
-}

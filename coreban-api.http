@@ -213,7 +213,7 @@ Content-Type: application/json
 
 # ─── Reminders ─────────────────────────────────────────────────────────────
 # Times come back in your timezone (the gateway's, from the token's tz
-# claim). Nothing is sent while you have
+# claim; without one, the zone coreban last saw for you). Nothing is sent while you have
 # no notification target: each pending reminder says
 # "paused": "no_notification_target".
 
