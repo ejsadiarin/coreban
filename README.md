@@ -167,7 +167,7 @@ migrates at start.
 | Labels | `GET/POST /api/coreban/boards/{id}/labels`, `PATCH/DELETE …/labels/{labelID}`; on a card `PUT/DELETE …/cards/{cardID}/labels/{labelID}` |
 | Settings | `GET/PUT /api/coreban/settings` — notification target (`ntfy_topic`); `saved` is false until the owner saves their own. A `timezone` a client still sends is ignored |
 | Reminders | `GET/POST /api/coreban/reminders`, `GET/PATCH/DELETE …/reminders/{id}` — see `coreban-api.http` |
-| Notes | `GET/POST /api/coreban/notes` (`?before=&limit=` pages back), `PATCH/DELETE …/notes/{id}` — see `coreban-api.http` |
+| Notes | `GET/POST /api/coreban/notes` (`?before=&limit=` pages back), `PATCH/DELETE …/notes/{id}` — see `coreban-api.http`; `GET …/notes/days?from=&to=` lists the dates (owner's zone, at most 62 days) with a note that isn't archived |
 | Attachments | `POST /api/coreban/attachments` — a signed upload link for one image or video; post the note with `"attachments": [ids]` |
 
 coreban refuses to start if it cannot fetch the gateway's JWKS

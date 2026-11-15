@@ -2,8 +2,10 @@ package note
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -26,11 +28,17 @@ const maxNoteBody = 64 << 10
 // targeted read (act_as); writes always bind to the caller.
 type Handler struct {
 	Store *Store
+	// Zones gives the owner's timezone, which the days with notes are
+	// counted in (settings.Store).
+	Zones interface {
+		Zone(ctx context.Context, owner uuid.UUID) (*time.Location, error)
+	}
 }
 
 // Mount registers the note routes on r.
 func (h *Handler) Mount(r chi.Router) {
 	r.Get("/", h.feed)
+	r.Get("/days", h.days)
 	r.Post("/", h.post)
 	r.Post("/sync", h.sync)
 	r.Delete("/records/{kind}/{recordID}", h.removeRecord)
@@ -87,6 +95,38 @@ func (h *Handler) feed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	helper.RespondJSON(w, http.StatusOK, p)
+}
+
+// days answers the dates from ?from= to ?to= (inclusive, YYYY-MM-DD, at
+// most MaxDaysRange days) on which the owner has a note that isn't
+// archived, counted in the owner's timezone: {"days": ["2026-11-05", …]}.
+func (h *Handler) days(w http.ResponseWriter, r *http.Request) {
+	owner, ok := helper.ResolveTargetUser(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	first, err1 := time.Parse(time.DateOnly, q.Get("from"))
+	last, err2 := time.Parse(time.DateOnly, q.Get("to"))
+	if err1 != nil || err2 != nil {
+		helper.RespondErrorJSON(w, http.StatusBadRequest, "from and to must be dates such as 2026-11-01")
+		return
+	}
+	if last.Before(first) || last.Sub(first) >= MaxDaysRange*24*time.Hour {
+		helper.RespondErrorJSON(w, http.StatusBadRequest, fmt.Sprintf("to must be on or after from, at most %d days on", MaxDaysRange-1))
+		return
+	}
+	loc, err := h.Zones.Zone(r.Context(), owner)
+	if err != nil {
+		helper.RespondErrorJSON(w, http.StatusInternalServerError, "failed to read your timezone")
+		return
+	}
+	days, err := h.Store.Days(r.Context(), owner, loc, first, last)
+	if err != nil {
+		helper.RespondErrorJSON(w, http.StatusInternalServerError, "failed to list the days with notes")
+		return
+	}
+	helper.RespondJSON(w, http.StatusOK, map[string][]string{"days": days})
 }
 
 // postRequest posts plain text, attachments the web has uploaded (with

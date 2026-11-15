@@ -48,7 +48,7 @@ func New(pool *pgxpool.Pool, authenticate func(http.Handler) http.Handler) *Serv
 		Reminders:    reminders,
 		// Linked reminders render as the Reminders page shows them, with
 		// the same clock and cap the server is given.
-		Notes:       &note.Handler{Store: &note.Store{Pool: pool, Reminders: reminders.Render}},
+		Notes:       &note.Handler{Store: &note.Store{Pool: pool, Reminders: reminders.Render}, Zones: settingsStore},
 		Attachments: &attachment.Handler{Store: &attachment.Store{Pool: pool}, Quota: attachment.DefaultQuota},
 	}
 }

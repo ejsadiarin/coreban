@@ -332,6 +332,50 @@ func (q *Queries) ListNoteCards(ctx context.Context, arg ListNoteCardsParams) ([
 	return items, nil
 }
 
+const listNoteDays = `-- name: ListNoteDays :many
+SELECT DISTINCT (posted_at AT TIME ZONE $1::text)::date AS day
+FROM notes
+WHERE owner_id = $2
+  AND archived_at IS NULL
+  AND posted_at >= $3::timestamptz
+  AND posted_at < $4::timestamptz
+ORDER BY day
+`
+
+type ListNoteDaysParams struct {
+	Tz       string             `json:"tz"`
+	OwnerID  uuid.UUID          `json:"owner_id"`
+	FromAt   pgtype.Timestamptz `json:"from_at"`
+	BeforeAt pgtype.Timestamptz `json:"before_at"`
+}
+
+// The local dates (in tz) on which the owner has a note that isn't archived,
+// for notes posted from from_at up to (not including) before_at, in order.
+func (q *Queries) ListNoteDays(ctx context.Context, arg ListNoteDaysParams) ([]pgtype.Date, error) {
+	rows, err := q.db.Query(ctx, listNoteDays,
+		arg.Tz,
+		arg.OwnerID,
+		arg.FromAt,
+		arg.BeforeAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.Date{}
+	for rows.Next() {
+		var day pgtype.Date
+		if err := rows.Scan(&day); err != nil {
+			return nil, err
+		}
+		items = append(items, day)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNoteReminders = `-- name: ListNoteReminders :many
 SELECT id, message, starts_at, rrule, local_start, next_fire_at, next_tz,
        last_delivery_at, last_delivery_late, last_delivery_error,

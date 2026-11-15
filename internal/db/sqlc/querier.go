@@ -112,6 +112,9 @@ type Querier interface {
 	ListNoteAttachments(ctx context.Context, arg ListNoteAttachmentsParams) ([]Attachment, error)
 	// The owner's cards among ids, as their notes show them.
 	ListNoteCards(ctx context.Context, arg ListNoteCardsParams) ([]ListNoteCardsRow, error)
+	// The local dates (in tz) on which the owner has a note that isn't archived,
+	// for notes posted from from_at up to (not including) before_at, in order.
+	ListNoteDays(ctx context.Context, arg ListNoteDaysParams) ([]pgtype.Date, error)
 	// The owner's reminders among ids, as their notes show them.
 	ListNoteReminders(ctx context.Context, arg ListNoteRemindersParams) ([]ListNoteRemindersRow, error)
 	// One page of the feed going back in time: the newest notes placed before

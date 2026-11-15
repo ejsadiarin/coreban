@@ -495,3 +495,29 @@ func notFound(err error) error {
 	}
 	return err
 }
+
+// MaxDaysRange is the most days one Days read covers: a month view with
+// room to spare.
+const MaxDaysRange = 62
+
+// Days lists the dates, from first to last inclusive and counted in loc,
+// on which the owner has a note that isn't archived, of any kind and in
+// date order ("2026-11-05"). The Feed's calendar marks them.
+func (s *Store) Days(ctx context.Context, owner uuid.UUID, loc *time.Location, first, last time.Time) ([]string, error) {
+	from := time.Date(first.Year(), first.Month(), first.Day(), 0, 0, 0, 0, loc)
+	before := time.Date(last.Year(), last.Month(), last.Day()+1, 0, 0, 0, 0, loc)
+	rows, err := s.queries().ListNoteDays(ctx, dbgen.ListNoteDaysParams{
+		Tz:       loc.String(),
+		OwnerID:  owner,
+		FromAt:   pgtype.Timestamptz{Time: from, Valid: true},
+		BeforeAt: pgtype.Timestamptz{Time: before, Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list note days: %w", err)
+	}
+	days := make([]string, 0, len(rows))
+	for _, d := range rows {
+		days = append(days, d.Time.Format(time.DateOnly))
+	}
+	return days, nil
+}

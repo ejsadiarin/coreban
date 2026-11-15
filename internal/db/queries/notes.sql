@@ -132,3 +132,14 @@ WITH found AS (
     WHERE d.id = f.id AND f.origin = 'budget'
 )
 SELECT origin FROM found;
+
+-- name: ListNoteDays :many
+-- The local dates (in tz) on which the owner has a note that isn't archived,
+-- for notes posted from from_at up to (not including) before_at, in order.
+SELECT DISTINCT (posted_at AT TIME ZONE sqlc.arg(tz)::text)::date AS day
+FROM notes
+WHERE owner_id = sqlc.arg(owner_id)
+  AND archived_at IS NULL
+  AND posted_at >= sqlc.arg(from_at)::timestamptz
+  AND posted_at < sqlc.arg(before_at)::timestamptz
+ORDER BY day;
