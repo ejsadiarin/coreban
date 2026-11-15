@@ -70,11 +70,10 @@ func newOwnerIn(t *testing.T, tz string) owner {
 }
 
 // inZone is the owner after setting their timezone to tz at the gateway:
-// the dispatcher's lookups answer it, and their requests carry it in the
-// token.
+// their requests carry it in the token's tz claim. coreban sees it on the
+// first such request.
 func (o owner) inZone(tz string) owner {
 	o.t.Helper()
-	testharness.FakeGateway(o.t).SetZone(o.id.Owner, tz)
 	id := o.id
 	id.Timezone = tz
 	return as(o.t, id)
@@ -303,5 +302,36 @@ func TestTheListSaysWhyNothingWillBeSentWithoutANotificationTarget(t *testing.T)
 	o.setTarget("coreban-" + uuid.NewString()[:8])
 	if got := o.list(); got[0].Paused != nil {
 		t.Errorf("paused = %v after setting a target, want none", *got[0].Paused)
+	}
+}
+
+func TestARequestWithoutATzClaimUsesTheZoneLastSeen(t *testing.T) {
+	o, _ := subscribed(t, "Asia/Manila")
+	// A token from a gateway that doesn't carry tz yet.
+	untagged := o.inZone("")
+	r := untagged.create("ship it", "2027-03-01T07:00")
+	if r.NextFireAt == nil || !strings.HasSuffix(*r.NextFireAt, "+08:00") || !strings.Contains(*r.NextFireAt, "T07:00") {
+		t.Fatalf("next = %v, want 07:00+08:00 (the zone last seen)", r.NextFireAt)
+	}
+	// It is never recorded as UTC: a request carrying tz later still finds Manila.
+	if got := o.list()[0].NextFireAt; got == nil || *got != *r.NextFireAt {
+		t.Errorf("next after a tz-less request = %v, want %s", got, *r.NextFireAt)
+	}
+}
+
+func TestAnOwnerWithNoZoneSeenAndNoTzClaimIsInUTC(t *testing.T) {
+	o, _ := newOwner(t)
+	r := o.create("ship it", "2027-03-01T07:00")
+	if r.NextFireAt == nil || *r.NextFireAt != "2027-03-01T07:00:00Z" {
+		t.Errorf("next = %v, want 2027-03-01T07:00:00Z", r.NextFireAt)
+	}
+}
+
+func TestATzClaimThisBuildCannotLoadFailsClosed(t *testing.T) {
+	for _, tz := range []string{"Mars/Olympus_Mons", "Local"} {
+		o := newOwnerIn(t, tz)
+		if rec := o.do(http.MethodGet, "/api/coreban/reminders", nil); rec.Code != http.StatusInternalServerError {
+			t.Errorf("list with tz %s: status = %d, body %s; want 500", tz, rec.Code, rec.Body)
+		}
 	}
 }

@@ -62,34 +62,21 @@ WHERE id = sqlc.arg(id) AND owner_id = sqlc.arg(owner_id);
 -- name: DeleteReminder :execrows
 DELETE FROM reminders WHERE id = $1 AND owner_id = $2;
 
--- name: DispatchOwners :many
--- Owners with a notification target and something still to send: the ones
--- whose timezone the dispatcher looks up from the gateway for a pass.
-SELECT DISTINCT r.owner_id
-FROM reminders r
-JOIN owner_settings s ON s.owner_id = r.owner_id
-WHERE r.next_fire_at IS NOT NULL AND s.ntfy_topic IS NOT NULL;
-
 -- name: ClaimOccurrence :one
--- The earliest reminder, of an owner whose timezone the dispatcher holds
--- (owner_ids[i] is in zones[i], as the gateway answered), whose moment has
--- come, or (recurring) whose next occurrence was worked out in a timezone
--- the owner has since left. Owners left out are skipped for this pass.
--- Locked for the claiming transaction; rows another dispatcher holds are
--- skipped.
+-- The earliest reminder of an owner with a notification target whose
+-- moment has come, or (recurring) whose next occurrence was worked out in a
+-- timezone the owner has since left. Locked for the claiming transaction;
+-- rows another dispatcher holds are skipped.
 -- paused: its card is completed (Done) or archived, so this occurrence is
 -- skipped, not sent.
-SELECT r.id, r.message, r.rrule, r.local_start, r.next_fire_at, r.next_tz, r.last_delivery_at, s.ntfy_topic,
-       (sqlc.arg(zones)::text[])[array_position(sqlc.arg(owner_ids)::uuid[], r.owner_id)]::text AS timezone,
+SELECT r.id, r.message, r.rrule, r.local_start, r.next_fire_at, r.next_tz, r.last_delivery_at, s.ntfy_topic, s.timezone,
        COALESCE(c.status = 'done' OR k.archived_at IS NOT NULL, false)::boolean AS paused
 FROM reminders r
 JOIN owner_settings s ON s.owner_id = r.owner_id
 LEFT JOIN cards k ON k.id = r.card_id
 LEFT JOIN columns c ON c.id = k.column_id
 WHERE s.ntfy_topic IS NOT NULL
-  AND r.owner_id = ANY(sqlc.arg(owner_ids)::uuid[])
-  AND (r.next_fire_at <= sqlc.arg(now)
-       OR r.next_tz <> (sqlc.arg(zones)::text[])[array_position(sqlc.arg(owner_ids)::uuid[], r.owner_id)])
+  AND (r.next_fire_at <= sqlc.arg(now) OR r.next_tz <> s.timezone)
 ORDER BY r.next_fire_at, r.id
 LIMIT 1
 FOR UPDATE OF r SKIP LOCKED;

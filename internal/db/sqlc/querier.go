@@ -28,15 +28,13 @@ type Querier interface {
 	// other cleaner takes them meanwhile; the bucket is called after this
 	// commits.
 	ClaimDeletions(ctx context.Context, arg ClaimDeletionsParams) ([]ClaimDeletionsRow, error)
-	// The earliest reminder, of an owner whose timezone the dispatcher holds
-	// (owner_ids[i] is in zones[i], as the gateway answered), whose moment has
-	// come, or (recurring) whose next occurrence was worked out in a timezone
-	// the owner has since left. Owners left out are skipped for this pass.
-	// Locked for the claiming transaction; rows another dispatcher holds are
-	// skipped.
+	// The earliest reminder of an owner with a notification target whose
+	// moment has come, or (recurring) whose next occurrence was worked out in a
+	// timezone the owner has since left. Locked for the claiming transaction;
+	// rows another dispatcher holds are skipped.
 	// paused: its card is completed (Done) or archived, so this occurrence is
 	// skipped, not sent.
-	ClaimOccurrence(ctx context.Context, arg ClaimOccurrenceParams) (ClaimOccurrenceRow, error)
+	ClaimOccurrence(ctx context.Context, now pgtype.Timestamptz) (ClaimOccurrenceRow, error)
 	// Every card counts, archived or not.
 	CountColumnCards(ctx context.Context, columnID uuid.UUID) (int64, error)
 	CountOwnerReminders(ctx context.Context, ownerID uuid.UUID) (int64, error)
@@ -77,9 +75,6 @@ type Querier interface {
 	DeleteReminder(ctx context.Context, arg DeleteReminderParams) (int64, error)
 	DeletionFailed(ctx context.Context, arg DeletionFailedParams) error
 	DeletionsDone(ctx context.Context, keys []string) error
-	// Owners with a notification target and something still to send: the ones
-	// whose timezone the dispatcher looks up from the gateway for a pass.
-	DispatchOwners(ctx context.Context) ([]uuid.UUID, error)
 	// When the dispatcher next has something to send.
 	EarliestFireAt(ctx context.Context) (pgtype.Timestamptz, error)
 	GetBoard(ctx context.Context, arg GetBoardParams) (GetBoardRow, error)
@@ -91,6 +86,8 @@ type Querier interface {
 	// Settings are keyed by owner_id: an owner only ever reads or writes their
 	// own row.
 	GetOwnerSettings(ctx context.Context, ownerID uuid.UUID) (pgtype.Text, error)
+	// The zone coreban last saw for the owner on a token.
+	GetOwnerTimezone(ctx context.Context, ownerID uuid.UUID) (string, error)
 	GetReminder(ctx context.Context, arg GetReminderParams) (GetReminderRow, error)
 	LabelOnBoard(ctx context.Context, arg LabelOnBoardParams) (uuid.UUID, error)
 	// Converts one of the owner's live plain notes in place: it keeps its place
@@ -150,8 +147,13 @@ type Querier interface {
 	// When the next queued file is due, if any is queued.
 	NextDeletion(ctx context.Context) (pgtype.Timestamptz, error)
 	PlaceCard(ctx context.Context, arg PlaceCardParams) error
+	// timezone is the owner's zone at their first save; afterwards only
+	// RecordOwnerTimezone changes it.
 	PutOwnerSettings(ctx context.Context, arg PutOwnerSettingsParams) error
 	RecordDelivery(ctx context.Context, arg RecordDeliveryParams) error
+	// Records a zone a token carried for an owner who has settings; a row
+	// already in that zone is left untouched.
+	RecordOwnerTimezone(ctx context.Context, arg RecordOwnerTimezoneParams) (int64, error)
 	RemoveLabel(ctx context.Context, arg RemoveLabelParams) error
 	RenameBoard(ctx context.Context, arg RenameBoardParams) (RenameBoardRow, error)
 	RenameLabel(ctx context.Context, arg RenameLabelParams) (int64, error)

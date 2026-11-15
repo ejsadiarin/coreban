@@ -30,27 +30,18 @@ func (q *Queries) AdvanceReminder(ctx context.Context, arg AdvanceReminderParams
 }
 
 const claimOccurrence = `-- name: ClaimOccurrence :one
-SELECT r.id, r.message, r.rrule, r.local_start, r.next_fire_at, r.next_tz, r.last_delivery_at, s.ntfy_topic,
-       ($1::text[])[array_position($2::uuid[], r.owner_id)]::text AS timezone,
+SELECT r.id, r.message, r.rrule, r.local_start, r.next_fire_at, r.next_tz, r.last_delivery_at, s.ntfy_topic, s.timezone,
        COALESCE(c.status = 'done' OR k.archived_at IS NOT NULL, false)::boolean AS paused
 FROM reminders r
 JOIN owner_settings s ON s.owner_id = r.owner_id
 LEFT JOIN cards k ON k.id = r.card_id
 LEFT JOIN columns c ON c.id = k.column_id
 WHERE s.ntfy_topic IS NOT NULL
-  AND r.owner_id = ANY($2::uuid[])
-  AND (r.next_fire_at <= $3
-       OR r.next_tz <> ($1::text[])[array_position($2::uuid[], r.owner_id)])
+  AND (r.next_fire_at <= $1 OR r.next_tz <> s.timezone)
 ORDER BY r.next_fire_at, r.id
 LIMIT 1
 FOR UPDATE OF r SKIP LOCKED
 `
-
-type ClaimOccurrenceParams struct {
-	Zones    []string           `json:"zones"`
-	OwnerIds []uuid.UUID        `json:"owner_ids"`
-	Now      pgtype.Timestamptz `json:"now"`
-}
 
 type ClaimOccurrenceRow struct {
 	ID             uuid.UUID          `json:"id"`
@@ -65,16 +56,14 @@ type ClaimOccurrenceRow struct {
 	Paused         bool               `json:"paused"`
 }
 
-// The earliest reminder, of an owner whose timezone the dispatcher holds
-// (owner_ids[i] is in zones[i], as the gateway answered), whose moment has
-// come, or (recurring) whose next occurrence was worked out in a timezone
-// the owner has since left. Owners left out are skipped for this pass.
-// Locked for the claiming transaction; rows another dispatcher holds are
-// skipped.
+// The earliest reminder of an owner with a notification target whose
+// moment has come, or (recurring) whose next occurrence was worked out in a
+// timezone the owner has since left. Locked for the claiming transaction;
+// rows another dispatcher holds are skipped.
 // paused: its card is completed (Done) or archived, so this occurrence is
 // skipped, not sent.
-func (q *Queries) ClaimOccurrence(ctx context.Context, arg ClaimOccurrenceParams) (ClaimOccurrenceRow, error) {
-	row := q.db.QueryRow(ctx, claimOccurrence, arg.Zones, arg.OwnerIds, arg.Now)
+func (q *Queries) ClaimOccurrence(ctx context.Context, now pgtype.Timestamptz) (ClaimOccurrenceRow, error) {
+	row := q.db.QueryRow(ctx, claimOccurrence, now)
 	var i ClaimOccurrenceRow
 	err := row.Scan(
 		&i.ID,
@@ -149,35 +138,6 @@ func (q *Queries) DeleteReminder(ctx context.Context, arg DeleteReminderParams) 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const dispatchOwners = `-- name: DispatchOwners :many
-SELECT DISTINCT r.owner_id
-FROM reminders r
-JOIN owner_settings s ON s.owner_id = r.owner_id
-WHERE r.next_fire_at IS NOT NULL AND s.ntfy_topic IS NOT NULL
-`
-
-// Owners with a notification target and something still to send: the ones
-// whose timezone the dispatcher looks up from the gateway for a pass.
-func (q *Queries) DispatchOwners(ctx context.Context) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, dispatchOwners)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []uuid.UUID{}
-	for rows.Next() {
-		var owner_id uuid.UUID
-		if err := rows.Scan(&owner_id); err != nil {
-			return nil, err
-		}
-		items = append(items, owner_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const earliestFireAt = `-- name: EarliestFireAt :one

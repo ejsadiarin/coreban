@@ -74,7 +74,7 @@ func (h *Handler) createCard(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := h.Store.CreateCard(r.Context(), owner, boardID, req.ColumnID, title, link)
 	if !respondCardError(w, err, "failed to create card") {
-		respondZoned(h, w, r, http.StatusCreated, c)
+		respondZoned(h, w, r, owner, http.StatusCreated, c)
 	}
 }
 
@@ -89,7 +89,7 @@ func (h *Handler) getCard(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := h.Store.GetCard(r.Context(), owner, boardID, cardID)
 	if !respondCardError(w, err, "failed to fetch card") {
-		respondZoned(h, w, r, http.StatusOK, c)
+		respondZoned(h, w, r, owner, http.StatusOK, c)
 	}
 }
 
@@ -117,7 +117,7 @@ func (h *Handler) listCards(w http.ResponseWriter, r *http.Request) {
 	}
 	cards, err := h.Store.ListCards(r.Context(), owner, boardID, r.URL.Query().Get("archived") == "true")
 	if !respondCardError(w, err, "failed to list cards") {
-		respondZoned(h, w, r, http.StatusOK, cardList(cards))
+		respondZoned(h, w, r, owner, http.StatusOK, cardList(cards))
 	}
 }
 
@@ -197,7 +197,7 @@ func (h *Handler) editCard(w http.ResponseWriter, r *http.Request) {
 	}
 	e := CardEdit{Title: req.Title, Description: req.Description, Archived: req.Archived}
 	if len(req.Due) > 0 {
-		loc, err := h.zone(r.Context())
+		loc, err := h.Settings.Zone(r.Context(), owner)
 		if err != nil {
 			helper.RespondErrorJSON(w, http.StatusInternalServerError, "failed to load your timezone")
 			return
@@ -211,7 +211,7 @@ func (h *Handler) editCard(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := h.Store.EditCard(r.Context(), owner, boardID, cardID, e)
 	if !respondCardError(w, err, "failed to edit card") {
-		respondZoned(h, w, r, http.StatusOK, c)
+		respondZoned(h, w, r, owner, http.StatusOK, c)
 	}
 }
 
@@ -237,7 +237,7 @@ func (h *Handler) moveCard(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := h.Store.MoveCard(r.Context(), owner, boardID, cardID, req.ColumnID, req.Index)
 	if !respondCardError(w, err, "failed to move card") {
-		respondZoned(h, w, r, http.StatusOK, c)
+		respondZoned(h, w, r, owner, http.StatusOK, c)
 	}
 }
 

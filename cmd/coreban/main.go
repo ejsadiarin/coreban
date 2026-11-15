@@ -10,6 +10,9 @@ import (
 	"net/http"
 	"os"
 	"time"
+	// The runtime image ships without zoneinfo; embed it so every zone a
+	// token asserts loads the same everywhere.
+	_ "time/tzdata"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -18,7 +21,6 @@ import (
 	"github.com/ejsadiarin/coreban/internal/auth"
 	"github.com/ejsadiarin/coreban/internal/config"
 	"github.com/ejsadiarin/coreban/internal/db"
-	"github.com/ejsadiarin/coreban/internal/gateway"
 	"github.com/ejsadiarin/coreban/internal/reminder"
 	"github.com/ejsadiarin/coreban/internal/server"
 )
@@ -76,7 +78,7 @@ func serve(ctx context.Context, cfg *config.Config) error {
 	if cfg.NtfyURL == "" {
 		slog.Warn("coreban-api: NTFY_URL is not set; reminders will not be sent")
 	} else {
-		dispatcher := reminder.NewDispatcher(pool, &reminder.Ntfy{URL: cfg.NtfyURL, Token: cfg.NtfyToken}, &gateway.Client{URL: cfg.GatewayURL, APIKey: cfg.GatewayAPIKey}, time.Now)
+		dispatcher := reminder.NewDispatcher(pool, &reminder.Ntfy{URL: cfg.NtfyURL, Token: cfg.NtfyToken}, time.Now)
 		api.Reminders.Changed = dispatcher.Wake
 		api.Settings.Changed = dispatcher.Wake
 		go dispatcher.Run(ctx)

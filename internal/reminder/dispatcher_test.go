@@ -54,7 +54,7 @@ func (n *inbox) to(topic string) []reminder.Notification {
 // tickAt runs one dispatch with the clock reading now.
 func tickAt(t *testing.T, ctx context.Context, n reminder.Notifier, now time.Time) {
 	t.Helper()
-	d := reminder.NewDispatcher(testharness.Postgres(t), n, testharness.FakeGateway(t).Client(), func() time.Time { return now })
+	d := reminder.NewDispatcher(testharness.Postgres(t), n, func() time.Time { return now })
 	if err := d.Tick(ctx); err != nil {
 		t.Fatalf("tick at %s: %v", now, err)
 	}
@@ -138,7 +138,7 @@ func TestARestartMidDispatchDoesNotSendTwice(t *testing.T) {
 	// can record anything, and before it reaches the second.
 	ctx, die := context.WithCancel(context.Background())
 	n := &inbox{afterSend: die}
-	d := reminder.NewDispatcher(testharness.Postgres(t), n, testharness.FakeGateway(t).Client(), func() time.Time { return at })
+	d := reminder.NewDispatcher(testharness.Postgres(t), n, func() time.Time { return at })
 	_ = d.Tick(ctx)
 	if got := n.to(topic); len(got) != 1 {
 		t.Fatalf("sent %d before dying, want 1", len(got))
@@ -238,7 +238,7 @@ func TestAReminderNtfyCouldNotTakeYetIsSentOnceItCan(t *testing.T) {
 
 	// coreban is back before ntfy is: the catch-up can't get through.
 	down := &inbox{fail: fmt.Errorf("ntfy unreachable: %w", reminder.ErrRetryLater)}
-	d := reminder.NewDispatcher(testharness.Postgres(t), down, testharness.FakeGateway(t).Client(), func() time.Time { return at.Add(time.Hour) })
+	d := reminder.NewDispatcher(testharness.Postgres(t), down, func() time.Time { return at.Add(time.Hour) })
 	if err := d.Tick(ctx); !errors.Is(err, reminder.ErrRetryLater) {
 		t.Fatalf("tick while ntfy is unreachable = %v, want ErrRetryLater", err)
 	}
@@ -252,43 +252,5 @@ func TestAReminderNtfyCouldNotTakeYetIsSentOnceItCan(t *testing.T) {
 	got := n.to(topic)
 	if len(got) != 1 || !got[0].Late || !got[0].At.Equal(at) {
 		t.Errorf("once ntfy was back: %+v, want it sent once, late, for %s", got, at)
-	}
-}
-
-func TestAnOwnerWhoseZoneTheGatewayCantGiveIsSkippedThenCaughtUp(t *testing.T) {
-	gw := testharness.FakeGateway(t)
-	manila := mustLoad(t, "Asia/Manila")
-	stuck, stuckTopic := subscribed(t, "Asia/Manila")
-	fine, fineTopic := subscribed(t, "Asia/Manila")
-	at := future(manila, 2*time.Hour)
-	stuck.create("waits for the gateway", wall(at))
-	fine.create("goes out on time", wall(at))
-	ctx := context.Background()
-
-	// The gateway can't answer for one owner: their pass is skipped, never
-	// sent in a guessed zone, and the others' go out.
-	gw.Fail(stuck.id.Owner, true)
-	n := &inbox{}
-	d := reminder.NewDispatcher(testharness.Postgres(t), n, gw.Client(), func() time.Time { return at })
-	if err := d.Tick(ctx); !errors.Is(err, reminder.ErrZoneUnknown) {
-		t.Fatalf("tick with one owner's zone unknown = %v, want ErrZoneUnknown", err)
-	}
-	if got := n.to(fineTopic); len(got) != 1 || got[0].Late {
-		t.Errorf("the other owner got %+v, want theirs on time", got)
-	}
-	if got := n.to(stuckTopic); len(got) != 0 {
-		t.Errorf("sent without the owner's zone: %+v", got)
-	}
-	if r := stuck.list()[0]; r.NextFireAt == nil || r.LastDelivery != nil {
-		t.Fatalf("after the failed lookup: %+v, want it still pending", r)
-	}
-
-	// The retry once the gateway answers catches it up, once.
-	gw.Fail(stuck.id.Owner, false)
-	tickAt(t, ctx, n, at.Add(10*time.Minute))
-	tickAt(t, ctx, n, at.Add(11*time.Minute))
-	got := n.to(stuckTopic)
-	if len(got) != 1 || !got[0].Late || !got[0].At.Equal(at) || got[0].At.Location().String() != "Asia/Manila" {
-		t.Errorf("after the gateway came back: %+v, want it sent once, late, due %s in Manila", got, at)
 	}
 }

@@ -99,6 +99,15 @@ func TestANewOwnerHasNoTargetUntilTheySaveOne(t *testing.T) {
 	}
 }
 
+func TestSeeingTheOwnersZoneOnATokenIsNotSavingSettings(t *testing.T) {
+	id := uuid.New()
+	o := as(t, testharness.Identity{Owner: id, Scopes: []string{"coreban:read", "coreban:write"}, Timezone: "Asia/Manila"})
+	o.get()
+	if got := o.get(); got.NtfyTopic != nil || got.Saved {
+		t.Errorf("after requests carrying a tz claim: topic %s, saved %v; want the unsaved defaults", topicOf(got), got.Saved)
+	}
+}
+
 func TestTheTimezoneIsTheGatewaysAndNoLongerASetting(t *testing.T) {
 	o, _ := newOwner(t)
 	// A client that still sends one, valid or not, isn't refused; it is

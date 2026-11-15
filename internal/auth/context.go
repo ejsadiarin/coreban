@@ -2,10 +2,6 @@ package auth
 
 import (
 	"context"
-	"time"
-	// The runtime image ships without zoneinfo; embed it so every zone the
-	// gateway asserts resolves the same everywhere.
-	_ "time/tzdata"
 
 	"github.com/google/uuid"
 )
@@ -68,14 +64,17 @@ func WithTimezone(ctx context.Context, tz string) context.Context {
 	return context.WithValue(ctx, tzKey, tz)
 }
 
-// LocationFromContext returns the zone the request's times are read and
-// shown in: the token's tz claim, or UTC for a token minted before the
-// gateway carried one. A claim no zone database knows is an error, never
-// a guess.
-func LocationFromContext(ctx context.Context) (*time.Location, error) {
-	tz, _ := ctx.Value(tzKey).(string)
+// TimezoneFromContext returns the token's tz claim and the user it is
+// about: the act_as target on a targeted read, else the caller. ok is false
+// when the token carried no tz (minted by a gateway that doesn't yet).
+func TimezoneFromContext(ctx context.Context) (tz string, about uuid.UUID, ok bool) {
+	tz, _ = ctx.Value(tzKey).(string)
 	if tz == "" {
-		return time.UTC, nil
+		return "", uuid.Nil, false
 	}
-	return time.LoadLocation(tz)
+	about, ok = ActAsFromContext(ctx)
+	if !ok {
+		about, ok = UserIDFromContext(ctx)
+	}
+	return tz, about, ok
 }

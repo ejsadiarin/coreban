@@ -1,16 +1,13 @@
 // Package settings serves each owner's notification target (an ntfy topic
-// on the homelab's own ntfy server). Their timezone is not a setting here:
-// the gateway owns it (coregateway ADR-0005).
+// on the homelab's own ntfy server), and the zone coreban last saw for them.
+// Their timezone is not a setting here: the gateway owns it (coregateway
+// ADR-0005) and asserts it in each token's tz claim.
 package settings
 
 import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
-	// The runtime image ships without zoneinfo; embed it so every IANA zone
-	// validates (and later resolves) the same everywhere.
-	_ "time/tzdata"
 )
 
 // Settings is one owner's notification settings. A nil NtfyTopic means the
@@ -68,19 +65,4 @@ func normalize(v Settings) (Settings, error) {
 		return Settings{}, err
 	}
 	return Settings{NtfyTopic: topic}, nil
-}
-
-// ValidTimezone reports whether tz names an IANA zone, for a request that
-// names one (the Feed's budget sync). "Local" is refused:
-// it means the server's zone, not the owner's. So are the host zoneinfo's
-// extras (posix/, right/, Factory, posixrules), which LoadLocation finds on
-// a dev box but the embedded tzdata in the image does not have.
-func ValidTimezone(tz string) bool {
-	switch {
-	case tz == "", tz == "Local", tz == "Factory", tz == "posixrules",
-		strings.HasPrefix(tz, "posix/"), strings.HasPrefix(tz, "right/"):
-		return false
-	}
-	_, err := time.LoadLocation(tz)
-	return err == nil
 }

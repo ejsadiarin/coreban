@@ -334,18 +334,14 @@ func TestMiddlewareSubLessTokenRejected(t *testing.T) {
 	}
 }
 
-// zoneOf runs token through the middleware and returns the zone the handler
-// sees, and the status.
+// zoneOf runs token through the middleware and returns the tz claim the
+// handler sees ("" for none), and the status.
 func zoneOf(t *testing.T, v *Verifier, token string) (string, int) {
 	t.Helper()
 	var zone string
 	rec := httptest.NewRecorder()
 	v.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		loc, err := LocationFromContext(r.Context())
-		if err != nil {
-			t.Fatalf("location: %v", err)
-		}
-		zone = loc.String()
+		zone, _, _ = TimezoneFromContext(r.Context())
 		w.WriteHeader(http.StatusOK)
 	})).ServeHTTP(rec, bearerReq(token))
 	return zone, rec.Code
@@ -360,10 +356,10 @@ func TestTheOwnersZoneComesFromTheTokensTzClaim(t *testing.T) {
 	if zone, code := zoneOf(t, v, manila); code != http.StatusOK || zone != "Asia/Manila" {
 		t.Errorf("tz claim Asia/Manila: status %d, zone %q; want 200 Asia/Manila", code, zone)
 	}
-	// Minted before the gateway carried tz (the gateway's ADR-0005): UTC.
+	// Minted before the gateway carried tz (the gateway's ADR-0005): none.
 	old := signToken(t, priv, "2026-09-a", nil)
-	if zone, code := zoneOf(t, v, old); code != http.StatusOK || zone != "UTC" {
-		t.Errorf("no tz claim: status %d, zone %q; want 200 UTC", code, zone)
+	if zone, code := zoneOf(t, v, old); code != http.StatusOK || zone != "" {
+		t.Errorf("no tz claim: status %d, zone %q; want 200 and none", code, zone)
 	}
 }
 
