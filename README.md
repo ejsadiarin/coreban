@@ -11,7 +11,7 @@ Kanban boards and ntfy reminders, served as a downstream service behind
 its `local-up` target builds and starts coreban, the gateway, the other services
 and the dashboard, with their own Postgres and an S3 server for
 attachments. See coregateway's
-[Quick start](https://github.com/ejsadiarin/coregateway/blob/rewrite-v2/README.md#quick-start-the-whole-stack-locally). Reminders
+[Quick start](https://github.com/ejsadiarin/coregateway/blob/main/README.md#quick-start-the-whole-stack-locally). Reminders
 are saved there but not sent, since the local stack has no ntfy.
 
 **Run this repo's code against that stack.** With coregateway's `local-up` target
@@ -39,11 +39,11 @@ container.
 
 | What | Needed for | How |
 |---|---|---|
-| The `coreban` schema and `coreban_role` in Neon's `coredb` | Everything | [Running](#running) below, or coregateway's [Setting up Neon](https://github.com/ejsadiarin/coregateway/blob/rewrite-v2/README.md#setting-up-neon) for the whole stack |
-| The gateway, reachable at `JWT_JWKS_URL` | Everything: coreban refuses to start without its keys | [coregateway](https://github.com/ejsadiarin/coregateway/blob/rewrite-v2/README.md) |
+| The `coreban` schema and `coreban_role` in Neon's `coredb` | Everything | [Running](#running) below, or coregateway's [Setting up Neon](https://github.com/ejsadiarin/coregateway/blob/main/README.md#setting-up-neon) for the whole stack |
+| The gateway, reachable at `JWT_JWKS_URL` | Everything: coreban refuses to start without its keys | [coregateway](https://github.com/ejsadiarin/coregateway/blob/main/README.md) |
 | A `.env` from `.env.example` | Everything | `DATABASE_URL`, `MIGRATION_URL` and `JWT_JWKS_URL` are required |
 | An ntfy server, and a write token limited to `coreban-*` topics | Sending reminders (optional: without `NTFY_URL` they are saved, not sent) | [ntfy server](#ntfy-server) below |
-| A Cloudflare R2 bucket, an API token and a CORS rule | Images and videos in the Feed (optional: without `S3_ENDPOINT` uploads answer 503) | coregateway's [R2 runbook](https://github.com/ejsadiarin/coregateway/blob/rewrite-v2/docs/deploy/coreban-attachments.md); short version in [Attachments bucket](#attachments-bucket) |
+| A Cloudflare R2 bucket, an API token and a CORS rule | Images and videos in the Feed (optional: without `S3_ENDPOINT` uploads answer 503) | coregateway's [R2 runbook](https://github.com/ejsadiarin/coregateway/blob/main/docs/deploy/coreban-attachments.md); short version in [Attachments bucket](#attachments-bucket) |
 
 One image, `Dockerfile.coreban-api`. Run `make migrate-up` (or
 `./coreban-api migrate` in the image) before deploying a new image; nothing
