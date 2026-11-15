@@ -62,9 +62,9 @@ func tickAt(t *testing.T, ctx context.Context, n reminder.Notifier, now time.Tim
 
 // subscribed is an owner with their own notification target in tz.
 func subscribed(t *testing.T, tz string) (owner, string) {
-	o, _ := newOwner(t)
+	o := newOwnerIn(t, tz)
 	topic := "coreban-" + uuid.NewString()[:12]
-	o.setTarget(topic, tz)
+	o.setTarget(topic)
 	return o, topic
 }
 
@@ -196,7 +196,7 @@ func TestNothingIsSentWithoutANotificationTargetUntilOneIsSet(t *testing.T) {
 	}
 
 	topic := "coreban-" + uuid.NewString()[:12]
-	o.setTarget(topic, "UTC")
+	o.setTarget(topic)
 	tickAt(t, ctx, n, at.Add(2*time.Minute))
 	got := n.to(topic)
 	if len(got) != 1 || !got[0].Late {

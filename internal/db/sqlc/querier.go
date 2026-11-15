@@ -85,7 +85,9 @@ type Querier interface {
 	GetOwnedCard(ctx context.Context, arg GetOwnedCardParams) (GetOwnedCardRow, error)
 	// Settings are keyed by owner_id: an owner only ever reads or writes their
 	// own row.
-	GetOwnerSettings(ctx context.Context, ownerID uuid.UUID) (GetOwnerSettingsRow, error)
+	GetOwnerSettings(ctx context.Context, ownerID uuid.UUID) (pgtype.Text, error)
+	// The zone coreban last saw for the owner on a token.
+	GetOwnerTimezone(ctx context.Context, ownerID uuid.UUID) (string, error)
 	GetReminder(ctx context.Context, arg GetReminderParams) (GetReminderRow, error)
 	LabelOnBoard(ctx context.Context, arg LabelOnBoardParams) (uuid.UUID, error)
 	// Converts one of the owner's live plain notes in place: it keeps its place
@@ -145,8 +147,13 @@ type Querier interface {
 	// When the next queued file is due, if any is queued.
 	NextDeletion(ctx context.Context) (pgtype.Timestamptz, error)
 	PlaceCard(ctx context.Context, arg PlaceCardParams) error
+	// timezone is the owner's zone at their first save; afterwards only
+	// RecordOwnerTimezone changes it.
 	PutOwnerSettings(ctx context.Context, arg PutOwnerSettingsParams) error
 	RecordDelivery(ctx context.Context, arg RecordDeliveryParams) error
+	// Records a zone a token carried for an owner who has settings; a row
+	// already in that zone is left untouched.
+	RecordOwnerTimezone(ctx context.Context, arg RecordOwnerTimezoneParams) (int64, error)
 	RemoveLabel(ctx context.Context, arg RemoveLabelParams) error
 	RenameBoard(ctx context.Context, arg RenameBoardParams) (RenameBoardRow, error)
 	RenameLabel(ctx context.Context, arg RenameLabelParams) (int64, error)

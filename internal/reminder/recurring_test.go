@@ -6,8 +6,6 @@ import (
 	"slices"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 func (o owner) createScheduled(message string, sched map[string]any) item {
@@ -49,8 +47,7 @@ func parseNext(t *testing.T, r item) time.Time {
 }
 
 func TestEachPresetShowsItsNextFiringInTheOwnersTimezone(t *testing.T) {
-	o, _ := newOwner(t)
-	o.setTarget(nil, "Asia/Manila")
+	o := newOwnerIn(t, "Asia/Manila")
 	manila := mustLoad(t, "Asia/Manila")
 	now := time.Now()
 
@@ -242,22 +239,39 @@ func TestMissedRecurringOccurrencesAreSkippedNotReplayed(t *testing.T) {
 	}
 }
 
-func TestChangingTheOwnersTimezoneReanchorsFutureOccurrences(t *testing.T) {
-	o, _ := newOwner(t)
-	topic := "coreban-" + uuid.NewString()[:12]
-	o.setTarget(topic, "UTC")
+func TestAZoneChangeSeenOnARequestReanchorsFutureOccurrences(t *testing.T) {
+	o, topic := subscribed(t, "UTC")
 	o.createScheduled("journal", daily("07:00"))
 
-	o.setTarget(topic, "Asia/Manila")
-	next := parseNext(t, o.list()[0])
+	// The owner sets Manila at the gateway; their next request to coreban
+	// carries it, and shows the reminder in Manila.
+	moved := o.inZone("Asia/Manila")
+	next := parseNext(t, moved.list()[0])
 	if _, off := next.Zone(); off != 8*3600 || next.Hour() != 7 {
 		t.Errorf("next after moving to Manila = %s, want 07:00+08:00", next.Format(time.RFC3339))
 	}
 
+	// The dispatcher, which has no token, uses the zone that request left.
 	n := &inbox{}
 	manila := mustLoad(t, "Asia/Manila")
 	at := time.Date(2027, 4, 1, 7, 0, 0, 0, manila)
 	tickAt(t, context.Background(), n, at.Add(-time.Hour)) // 07:00 in some other zone is not it
+	tickAt(t, context.Background(), n, at)
+	if got := sends(n, topic, manila); !slices.Equal(got, []string{"Thu 2027-04-01 07:00 PST"}) {
+		t.Errorf("sends = %v, want 07:00 Manila", got)
+	}
+}
+
+func TestAZoneChangeTheOwnerHasNotBroughtToCorebanYetIsNotGuessed(t *testing.T) {
+	o, topic := subscribed(t, "Asia/Manila")
+	o.createScheduled("journal", daily("07:00"))
+
+	// Moved to Berlin at the gateway, but no request has reached coreban:
+	// the dispatcher keeps the last zone it saw.
+	_ = o.inZone("Europe/Berlin")
+	n := &inbox{}
+	manila := mustLoad(t, "Asia/Manila")
+	at := time.Date(2027, 4, 1, 7, 0, 0, 0, manila)
 	tickAt(t, context.Background(), n, at)
 	if got := sends(n, topic, manila); !slices.Equal(got, []string{"Thu 2027-04-01 07:00 PST"}) {
 		t.Errorf("sends = %v, want 07:00 Manila", got)
@@ -287,7 +301,7 @@ func TestMovingToAZoneWithTheSameOffsetRightAfterASendDoesNotRepeatIt(t *testing
 	at := time.Date(2027, 5, 3, 7, 0, 0, 0, manila)
 	tickAt(t, context.Background(), n, at)
 
-	o.setTarget(topic, "Asia/Singapore") // also +08:00
+	o.inZone("Asia/Singapore").list() // also +08:00; coreban sees it
 	tickAt(t, context.Background(), n, at.Add(30*time.Second))
 	if got := sends(n, topic, manila); !slices.Equal(got, []string{"Mon 2027-05-03 07:00 PST"}) {
 		t.Errorf("sends = %v, want the 07:00 once", got)

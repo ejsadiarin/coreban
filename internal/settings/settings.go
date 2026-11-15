@@ -1,30 +1,23 @@
 // Package settings serves each owner's notification target (an ntfy topic
-// on the homelab's own ntfy server) and the timezone their schedules are
-// read in.
+// on the homelab's own ntfy server), and the zone coreban last saw for them.
+// Their timezone is not a setting here: the gateway owns it (coregateway
+// ADR-0005) and asserts it in each token's tz claim.
 package settings
 
 import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
-	// The runtime image ships without zoneinfo; embed it so every IANA zone
-	// validates (and later resolves) the same everywhere.
-	_ "time/tzdata"
 )
 
 // Settings is one owner's notification settings. A nil NtfyTopic means the
 // owner has no notification target, so their reminders are not sent. Saved
-// says the owner has saved their own; until then these are the defaults,
-// which lets a client tell a chosen UTC from an unset one. Writes ignore it.
+// says the owner has saved their own; until then these are the defaults
+// (no target). Writes ignore it, and a timezone a client still sends.
 type Settings struct {
 	NtfyTopic *string `json:"ntfy_topic"`
-	Timezone  string  `json:"timezone"`
 	Saved     bool    `json:"saved"`
 }
-
-// defaults are an owner's settings until they save their own.
-var defaults = Settings{Timezone: "UTC"}
 
 // TopicPrefix confines owners to coreban's own topics on the homelab ntfy
 // server, where coreban's token may write to coreban-* and nothing else.
@@ -71,23 +64,5 @@ func normalize(v Settings) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
-	tz := strings.TrimSpace(v.Timezone)
-	if !ValidTimezone(tz) {
-		return Settings{}, invalid("timezone must be an IANA zone such as Asia/Manila")
-	}
-	return Settings{NtfyTopic: topic, Timezone: tz}, nil
-}
-
-// ValidTimezone reports whether tz names an IANA zone. "Local" is refused:
-// it means the server's zone, not the owner's. So are the host zoneinfo's
-// extras (posix/, right/, Factory, posixrules), which LoadLocation finds on
-// a dev box but the embedded tzdata in the image does not have.
-func ValidTimezone(tz string) bool {
-	switch {
-	case tz == "", tz == "Local", tz == "Factory", tz == "posixrules",
-		strings.HasPrefix(tz, "posix/"), strings.HasPrefix(tz, "right/"):
-		return false
-	}
-	_, err := time.LoadLocation(tz)
-	return err == nil
+	return Settings{NtfyTopic: topic}, nil
 }

@@ -93,8 +93,13 @@ Kanban boards and ntfy reminders, served as a downstream service behind
 
 **Notification target and timezone**
 - Each owner sets their ntfy topic (always `coreban-…`, never a URL, one
-  owner per topic) and IANA timezone. Without a topic nothing is sent, and
-  the reminder list says why.
+  owner per topic). Without a topic nothing is sent, and the reminder list
+  says why.
+- The owner's timezone is the gateway's (coregateway ADR-0005), not a
+  coreban setting: requests read it from the internal token's `tz` claim.
+  coreban records the zone it last saw for each owner, and uses it where
+  there is no claim: a token from a gateway that doesn't send `tz` yet
+  (UTC if none was ever seen), and the reminder dispatcher.
 
 **Access**
 - Only the gateway's internal token (audience `coreban`) is accepted;
@@ -116,7 +121,7 @@ Kanban boards and ntfy reminders, served as a downstream service behind
 | Columns | `POST /api/coreban/boards/{id}/columns`, `PATCH/DELETE …/columns/{columnID}`, `POST …/columns/{columnID}/move` — see `coreban-api.http` |
 | Cards | `GET/POST /api/coreban/boards/{id}/cards` (`?archived=true` lists archived), `GET/PATCH/DELETE …/cards/{cardID}`, `POST …/cards/{cardID}/move` — see `coreban-api.http` |
 | Labels | `GET/POST /api/coreban/boards/{id}/labels`, `PATCH/DELETE …/labels/{labelID}`; on a card `PUT/DELETE …/cards/{cardID}/labels/{labelID}` |
-| Settings | `GET/PUT /api/coreban/settings` — notification target (`ntfy_topic`) and IANA `timezone`; `saved` is false until the owner saves their own |
+| Settings | `GET/PUT /api/coreban/settings` — notification target (`ntfy_topic`); `saved` is false until the owner saves their own. A `timezone` a client still sends is ignored |
 | Reminders | `GET/POST /api/coreban/reminders`, `GET/PATCH/DELETE …/reminders/{id}` — see `coreban-api.http` |
 | Notes | `GET/POST /api/coreban/notes` (`?before=&limit=` pages back), `PATCH/DELETE …/notes/{id}` — see `coreban-api.http` |
 | Attachments | `POST /api/coreban/attachments` — a signed upload link for one image or video; post the note with `"attachments": [ids]` |
@@ -159,8 +164,14 @@ subscribe to, and a leaked `NTFY_TOKEN` cannot reach topics outside
 
 The dispatcher runs inside `coreban-api` when `NTFY_URL` is set. It sleeps
 until the next reminder's moment (or a create, reschedule, or settings
-save wakes it), so an idle coreban leaves the database alone. Each
-occurrence goes out at most once (ADR-0002):
+save, or a request showing the owner in a new zone, wakes it), so an
+idle coreban leaves the database alone. Each occurrence goes out at most
+once (ADR-0002).
+
+The dispatcher has no token, so it reads each owner's timezone as the
+zone coreban last saw for them. A zone the owner changes at the gateway
+reaches it with their next request to coreban, which re-anchors their
+recurring reminders to the new zone.
 
 - **On time**: sent at its moment.
 - **Missed** (coreban was down, or the owner had no notification target):

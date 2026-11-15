@@ -3,23 +3,51 @@ package settings
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/ejsadiarin/coreban/internal/auth"
 	"github.com/ejsadiarin/coreban/internal/helper"
 )
 
-// maxSettingsBody bounds a settings request: a topic name and a zone name.
+// maxSettingsBody bounds a settings request: a topic name (and the zone
+// name an older client still sends, which is ignored).
 const maxSettingsBody = 4 << 10
 
 // Handler serves the owner's settings. Reads resolve the owner through a
 // targeted read (act_as); writes always bind to the caller.
 type Handler struct {
 	Store *Store
-	// Changed, when set, is told the owner saved settings, so the reminder
-	// dispatcher can wake for reminders a new target unblocks.
+	// Changed, when set, is told the owner saved settings or coreban saw
+	// them in a new zone, so the reminder dispatcher can wake for reminders
+	// a new target unblocks or a new zone reschedules.
 	Changed func()
+}
+
+func (h *Handler) changed() {
+	if h.Changed != nil {
+		h.Changed()
+	}
+}
+
+// SeeZones records the zone each request's token asserts for the user it
+// is about, so work done without a token (the reminder dispatcher) uses
+// the zone they were last seen in. It runs after authentication; a failure
+// to record is logged, never the request's.
+func (h *Handler) SeeZones(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if tz, about, ok := auth.TimezoneFromContext(r.Context()); ok {
+			switch changed, err := h.Store.SeeZone(r.Context(), about, tz); {
+			case err != nil:
+				slog.WarnContext(r.Context(), "settings: can't record the zone seen", "owner", about, "error", err)
+			case changed:
+				h.changed()
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Mount registers the settings routes on r.
@@ -57,7 +85,12 @@ func (h *Handler) put(w http.ResponseWriter, r *http.Request) {
 		helper.RespondErrorJSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	switch err := h.Store.Put(r.Context(), owner, v); {
+	zone, err := h.Store.Zone(r.Context(), owner)
+	if err != nil {
+		helper.RespondErrorJSON(w, http.StatusInternalServerError, "failed to load your timezone")
+		return
+	}
+	switch err := h.Store.Put(r.Context(), owner, v, zone); {
 	case errors.Is(err, ErrTopicTaken):
 		helper.RespondErrorJSON(w, http.StatusConflict, "ntfy_topic is already in use; choose another name")
 		return
@@ -65,9 +98,7 @@ func (h *Handler) put(w http.ResponseWriter, r *http.Request) {
 		helper.RespondErrorJSON(w, http.StatusInternalServerError, "failed to save settings")
 		return
 	}
-	if h.Changed != nil {
-		h.Changed()
-	}
+	h.changed()
 	v.Saved = true
 	helper.RespondJSON(w, http.StatusOK, v)
 }

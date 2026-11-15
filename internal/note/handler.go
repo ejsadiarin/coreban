@@ -15,7 +15,7 @@ import (
 	"github.com/ejsadiarin/coreban/internal/auth"
 	"github.com/ejsadiarin/coreban/internal/feedlink"
 	"github.com/ejsadiarin/coreban/internal/helper"
-	"github.com/ejsadiarin/coreban/internal/settings"
+	"github.com/ejsadiarin/coreban/internal/moment"
 )
 
 // maxNoteBody bounds a note request: one note's text, with room for JSON
@@ -218,7 +218,8 @@ func (h *Handler) sync(w http.ResponseWriter, r *http.Request) {
 		helper.RespondErrorJSON(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if !settings.ValidTimezone(req.Timezone) {
+	loc, err := moment.LoadZone(req.Timezone)
+	if err != nil {
 		helper.RespondErrorJSON(w, http.StatusBadRequest, "timezone must be an IANA name such as Asia/Manila")
 		return
 	}
@@ -227,7 +228,6 @@ func (h *Handler) sync(w http.ResponseWriter, r *http.Request) {
 			"a sync takes at most "+strconv.Itoa(MaxSyncRecords)+" records")
 		return
 	}
-	loc, _ := time.LoadLocation(req.Timezone)
 	records := make([]SyncRecord, 0, len(req.Records))
 	for _, rec := range req.Records {
 		id, idErr := uuid.Parse(rec.ID)

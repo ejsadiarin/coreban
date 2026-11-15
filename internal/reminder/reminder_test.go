@@ -45,12 +45,13 @@ type item struct {
 
 // owner is one caller driving the API with a fixed injected identity.
 type owner struct {
-	t *testing.T
-	h http.Handler
+	t  *testing.T
+	h  http.Handler
+	id testharness.Identity
 }
 
 func as(t *testing.T, id testharness.Identity) owner {
-	return owner{t: t, h: testharness.Router(t, id)}
+	return owner{t: t, h: testharness.Router(t, id), id: id}
 }
 
 func identity(id uuid.UUID) testharness.Identity {
@@ -60,6 +61,22 @@ func identity(id uuid.UUID) testharness.Identity {
 func newOwner(t *testing.T) (owner, uuid.UUID) {
 	id := uuid.New()
 	return as(t, identity(id)), id
+}
+
+// newOwnerIn is a new owner whose gateway asserts tz as their timezone.
+func newOwnerIn(t *testing.T, tz string) owner {
+	o, _ := newOwner(t)
+	return o.inZone(tz)
+}
+
+// inZone is the owner after setting their timezone to tz at the gateway:
+// their requests carry it in the token's tz claim. coreban sees it on the
+// first such request.
+func (o owner) inZone(tz string) owner {
+	o.t.Helper()
+	id := o.id
+	id.Timezone = tz
+	return as(o.t, id)
 }
 
 func (o owner) do(method, path string, body any) *httptest.ResponseRecorder {
@@ -97,10 +114,10 @@ func once(at string) map[string]any {
 	return map[string]any{"kind": "once", "at": at}
 }
 
-// setTarget saves the owner's notification target and timezone.
-func (o owner) setTarget(topic any, tz string) {
+// setTarget saves the owner's notification target.
+func (o owner) setTarget(topic any) {
 	o.t.Helper()
-	expect(o.t, o.do(http.MethodPut, "/api/coreban/settings", map[string]any{"ntfy_topic": topic, "timezone": tz}), http.StatusOK)
+	expect(o.t, o.do(http.MethodPut, "/api/coreban/settings", map[string]any{"ntfy_topic": topic}), http.StatusOK)
 }
 
 func (o owner) create(message string, at string) item {
@@ -126,8 +143,7 @@ func future(loc *time.Location, d time.Duration) time.Time {
 func wall(t time.Time) string { return t.Format("2006-01-02T15:04") }
 
 func TestAOneOffIsListedWithItsNextFiringInTheOwnersTimezone(t *testing.T) {
-	o, _ := newOwner(t)
-	o.setTarget(nil, "Asia/Manila")
+	o := newOwnerIn(t, "Asia/Manila")
 	manila, _ := time.LoadLocation("Asia/Manila")
 	at := future(manila, 48*time.Hour)
 
@@ -154,8 +170,7 @@ func TestAOneOffIsListedWithItsNextFiringInTheOwnersTimezone(t *testing.T) {
 }
 
 func TestAnInstantWithAnOffsetIsKeptAsThatInstant(t *testing.T) {
-	o, _ := newOwner(t)
-	o.setTarget(nil, "Asia/Manila")
+	o := newOwnerIn(t, "Asia/Manila")
 	at := time.Now().Add(72 * time.Hour).UTC().Truncate(time.Second)
 
 	r := o.create("ship it", at.Format(time.RFC3339))
@@ -284,8 +299,39 @@ func TestTheListSaysWhyNothingWillBeSentWithoutANotificationTarget(t *testing.T)
 	if r.Paused == nil || *r.Paused != "no_notification_target" {
 		t.Errorf("paused = %v, want no_notification_target", r.Paused)
 	}
-	o.setTarget("coreban-"+uuid.NewString()[:8], "UTC")
+	o.setTarget("coreban-" + uuid.NewString()[:8])
 	if got := o.list(); got[0].Paused != nil {
 		t.Errorf("paused = %v after setting a target, want none", *got[0].Paused)
+	}
+}
+
+func TestARequestWithoutATzClaimUsesTheZoneLastSeen(t *testing.T) {
+	o, _ := subscribed(t, "Asia/Manila")
+	// A token from a gateway that doesn't carry tz yet.
+	untagged := o.inZone("")
+	r := untagged.create("ship it", "2027-03-01T07:00")
+	if r.NextFireAt == nil || !strings.HasSuffix(*r.NextFireAt, "+08:00") || !strings.Contains(*r.NextFireAt, "T07:00") {
+		t.Fatalf("next = %v, want 07:00+08:00 (the zone last seen)", r.NextFireAt)
+	}
+	// It is never recorded as UTC: a request carrying tz later still finds Manila.
+	if got := o.list()[0].NextFireAt; got == nil || *got != *r.NextFireAt {
+		t.Errorf("next after a tz-less request = %v, want %s", got, *r.NextFireAt)
+	}
+}
+
+func TestAnOwnerWithNoZoneSeenAndNoTzClaimIsInUTC(t *testing.T) {
+	o, _ := newOwner(t)
+	r := o.create("ship it", "2027-03-01T07:00")
+	if r.NextFireAt == nil || *r.NextFireAt != "2027-03-01T07:00:00Z" {
+		t.Errorf("next = %v, want 2027-03-01T07:00:00Z", r.NextFireAt)
+	}
+}
+
+func TestATzClaimThisBuildCannotLoadFailsClosed(t *testing.T) {
+	for _, tz := range []string{"Mars/Olympus_Mons", "Local"} {
+		o := newOwnerIn(t, tz)
+		if rec := o.do(http.MethodGet, "/api/coreban/reminders", nil); rec.Code != http.StatusInternalServerError {
+			t.Errorf("list with tz %s: status = %d, body %s; want 500", tz, rec.Code, rec.Body)
+		}
 	}
 }

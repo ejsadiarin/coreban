@@ -2,7 +2,11 @@
 // wall-clock time with no offset in the owner's timezone.
 package moment
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 var wallLayouts = []string{"2006-01-02T15:04:05", "2006-01-02T15:04"}
 
@@ -18,4 +22,17 @@ func Parse(s string, loc *time.Location) (time.Time, bool) {
 		}
 	}
 	return time.Time{}, false
+}
+
+// LoadZone loads tz as an owner's IANA zone. "Local" is refused: it means
+// the server's zone, not the owner's. So are the host zoneinfo's extras
+// (posix/, right/, Factory, posixrules), which LoadLocation finds on a dev
+// box but the tzdata embedded in the binary does not have.
+func LoadZone(tz string) (*time.Location, error) {
+	switch {
+	case tz == "", tz == "Local", tz == "Factory", tz == "posixrules",
+		strings.HasPrefix(tz, "posix/"), strings.HasPrefix(tz, "right/"):
+		return nil, fmt.Errorf("%q is not an IANA zone", tz)
+	}
+	return time.LoadLocation(tz)
 }

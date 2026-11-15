@@ -50,16 +50,16 @@ func (h *Handler) changed() {
 	}
 }
 
-// ownerView loads how the owner sees their reminders: their timezone,
-// and whether they have a notification target.
+// ownerView loads how the owner sees their reminders: their timezone, and
+// whether they have a notification target.
 func (h *Handler) ownerView(ctx context.Context, owner uuid.UUID) (view, error) {
+	loc, err := h.Settings.Zone(ctx, owner)
+	if err != nil {
+		return view{}, fmt.Errorf("owner timezone: %w", err)
+	}
 	s, err := h.Settings.Get(ctx, owner)
 	if err != nil {
 		return view{}, err
-	}
-	loc, err := time.LoadLocation(s.Timezone)
-	if err != nil {
-		return view{}, fmt.Errorf("owner timezone %q: %w", s.Timezone, err)
 	}
 	return view{loc: loc, noTarget: s.NtfyTopic == nil, now: h.Now()}, nil
 }

@@ -36,6 +36,9 @@ type Claims struct {
 	Azp   string `json:"azp"`
 	Scope string `json:"scope,omitempty"`
 	ActAs string `json:"act_as,omitempty"`
+	// Tz is the IANA zone of the user the request is about (the gateway's
+	// ADR-0005); absent on tokens minted before the gateway carried it.
+	Tz string `json:"tz,omitempty"`
 }
 
 // Config configures a Verifier.
@@ -263,6 +266,7 @@ func (v *Verifier) Middleware(next http.Handler) http.Handler {
 				return
 			}
 			ctx := WithUserID(r.Context(), userID, strings.Fields(claims.Scope))
+			ctx = WithTimezone(ctx, claims.Tz)
 			if claims.ActAs != "" {
 				if target, err := uuid.Parse(claims.ActAs); err == nil {
 					ctx = WithActAs(ctx, target)

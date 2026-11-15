@@ -16,7 +16,6 @@ const path = "/api/coreban/settings"
 
 type settings struct {
 	NtfyTopic *string `json:"ntfy_topic"`
-	Timezone  string  `json:"timezone"`
 	Saved     bool    `json:"saved"`
 }
 
@@ -66,9 +65,9 @@ func (o owner) get() settings {
 	return decode(o.t, rec)
 }
 
-func (o owner) put(topic any, tz string) *httptest.ResponseRecorder {
+func (o owner) put(topic any) *httptest.ResponseRecorder {
 	o.t.Helper()
-	return o.do(http.MethodPut, map[string]any{"ntfy_topic": topic, "timezone": tz})
+	return o.do(http.MethodPut, map[string]any{"ntfy_topic": topic})
 }
 
 func topicOf(s settings) string {
@@ -78,27 +77,54 @@ func topicOf(s settings) string {
 	return *s.NtfyTopic
 }
 
-func TestANewOwnerHasNoTargetAndUTCUntilTheySaveTheirSettings(t *testing.T) {
+func TestANewOwnerHasNoTargetUntilTheySaveOne(t *testing.T) {
 	o, _ := newOwner(t)
-	// saved: false tells a client these are the defaults, not a chosen UTC,
-	// so it may start the owner on their device's timezone.
-	if got := o.get(); got.NtfyTopic != nil || got.Timezone != "UTC" || got.Saved {
-		t.Fatalf("fresh owner settings = topic %s, timezone %q, saved %v; want no topic, UTC, unsaved", topicOf(got), got.Timezone, got.Saved)
+	if got := o.get(); got.NtfyTopic != nil || got.Saved {
+		t.Fatalf("fresh owner settings = topic %s, saved %v; want no topic, unsaved", topicOf(got), got.Saved)
 	}
 
 	// A saved field in the request is ignored, not stored.
-	rec := o.do(http.MethodPut, map[string]any{"ntfy_topic": "coreban-ejs_phone", "timezone": "Asia/Manila", "saved": false})
-	if got := decode(t, rec); rec.Code != http.StatusOK || topicOf(got) != "coreban-ejs_phone" || got.Timezone != "Asia/Manila" || !got.Saved {
+	rec := o.do(http.MethodPut, map[string]any{"ntfy_topic": "coreban-ejs_phone", "saved": false})
+	if got := decode(t, rec); rec.Code != http.StatusOK || topicOf(got) != "coreban-ejs_phone" || !got.Saved {
 		t.Fatalf("put: status = %d, body %s; want 200 with the saved settings", rec.Code, rec.Body)
 	}
-	if got := o.get(); topicOf(got) != "coreban-ejs_phone" || got.Timezone != "Asia/Manila" || !got.Saved {
-		t.Errorf("after put: topic %s, timezone %q, saved %v; want coreban-ejs_phone, Asia/Manila, saved", topicOf(got), got.Timezone, got.Saved)
+	if got := o.get(); topicOf(got) != "coreban-ejs_phone" || !got.Saved {
+		t.Errorf("after put: topic %s, saved %v; want coreban-ejs_phone, saved", topicOf(got), got.Saved)
 	}
 
 	// Clearing the topic leaves the owner without a notification target.
-	o.put(nil, "Europe/Berlin")
-	if got := o.get(); got.NtfyTopic != nil || got.Timezone != "Europe/Berlin" {
-		t.Errorf("after clearing: topic %s, timezone %q; want no topic, Europe/Berlin", topicOf(got), got.Timezone)
+	o.put(nil)
+	if got := o.get(); got.NtfyTopic != nil {
+		t.Errorf("after clearing: topic %s, want none", topicOf(got))
+	}
+}
+
+func TestSeeingTheOwnersZoneOnATokenIsNotSavingSettings(t *testing.T) {
+	id := uuid.New()
+	o := as(t, testharness.Identity{Owner: id, Scopes: []string{"coreban:read", "coreban:write"}, Timezone: "Asia/Manila"})
+	o.get()
+	if got := o.get(); got.NtfyTopic != nil || got.Saved {
+		t.Errorf("after requests carrying a tz claim: topic %s, saved %v; want the unsaved defaults", topicOf(got), got.Saved)
+	}
+}
+
+func TestTheTimezoneIsTheGatewaysAndNoLongerASetting(t *testing.T) {
+	o, _ := newOwner(t)
+	// A client that still sends one, valid or not, isn't refused; it is
+	// ignored, neither stored nor shown.
+	for _, tz := range []any{"Asia/Manila", "Mars/Olympus_Mons", ""} {
+		rec := o.do(http.MethodPut, map[string]any{"ntfy_topic": "coreban-phone-tz", "timezone": tz})
+		if rec.Code != http.StatusOK {
+			t.Errorf("put with timezone %q: status = %d, body %s; want 200", tz, rec.Code, rec.Body)
+		}
+	}
+	rec := o.do(http.MethodGet, nil)
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode %q: %v", rec.Body.String(), err)
+	}
+	if _, ok := raw["timezone"]; ok || raw["ntfy_topic"] != "coreban-phone-tz" {
+		t.Errorf("settings = %s, want the topic and no timezone", rec.Body)
 	}
 }
 
@@ -115,7 +141,7 @@ func errorOf(t *testing.T, rec *httptest.ResponseRecorder) string {
 
 func TestTopicsMustBeACorebanPrefixedNameNeverAURL(t *testing.T) {
 	o, _ := newOwner(t)
-	if rec := o.put("coreban-phone", "UTC"); rec.Code != http.StatusOK {
+	if rec := o.put("coreban-phone"); rec.Code != http.StatusOK {
 		t.Fatalf("seed: status = %d, body %s", rec.Code, rec.Body)
 	}
 
@@ -131,7 +157,7 @@ func TestTopicsMustBeACorebanPrefixedNameNeverAURL(t *testing.T) {
 		{"coreban-ph%6Fne", "ntfy_topic may only use letters, digits, - and _"},
 		{"coreban-" + string(bytes.Repeat([]byte("a"), 57)), "ntfy_topic must be at most 64 characters"},
 	} {
-		rec := o.put(c.topic, "UTC")
+		rec := o.put(c.topic)
 		if rec.Code != http.StatusBadRequest || errorOf(t, rec) != c.wantError {
 			t.Errorf("topic %q: status = %d, body %s; want 400 %q", c.topic, rec.Code, rec.Body, c.wantError)
 		}
@@ -142,61 +168,39 @@ func TestTopicsMustBeACorebanPrefixedNameNeverAURL(t *testing.T) {
 
 	// The longest allowed name, surrounding whitespace trimmed.
 	longest := "coreban-" + string(bytes.Repeat([]byte("a"), 56))
-	if rec := o.put("  "+longest+" ", "UTC"); rec.Code != http.StatusOK || topicOf(decode(t, rec)) != longest {
+	if rec := o.put("  " + longest + " "); rec.Code != http.StatusOK || topicOf(decode(t, rec)) != longest {
 		t.Errorf("64-character topic: status = %d, body %s; want 200 saved trimmed", rec.Code, rec.Body)
 	}
 	// An empty topic clears the target, like null.
-	if rec := o.put("", "UTC"); rec.Code != http.StatusOK || decode(t, rec).NtfyTopic != nil {
+	if rec := o.put(""); rec.Code != http.StatusOK || decode(t, rec).NtfyTopic != nil {
 		t.Errorf("empty topic: status = %d, body %s; want 200 with no topic", rec.Code, rec.Body)
-	}
-}
-
-func TestTimezoneMustBeAnIANAZone(t *testing.T) {
-	o, _ := newOwner(t)
-	for _, tz := range []string{
-		"", "Local", "Mars/Olympus_Mons", "GMT+8", "../../etc/passwd", "asia/manila",
-		// Host zoneinfo extras that the embedded tzdata in the image lacks.
-		"posix/Asia/Manila", "right/UTC", "Factory", "posixrules",
-	} {
-		rec := o.put("coreban-phone", tz)
-		if rec.Code != http.StatusBadRequest || errorOf(t, rec) != "timezone must be an IANA zone such as Asia/Manila" {
-			t.Errorf("timezone %q: status = %d, body %s; want 400", tz, rec.Code, rec.Body)
-		}
-	}
-	if got := o.get(); got.NtfyTopic != nil || got.Timezone != "UTC" {
-		t.Errorf("after rejected puts: %s %q, want the untouched defaults", topicOf(got), got.Timezone)
-	}
-	for _, tz := range []string{"UTC", "America/Argentina/Buenos_Aires", "Etc/GMT-8"} {
-		if rec := o.put(nil, tz); rec.Code != http.StatusOK || decode(t, rec).Timezone != tz {
-			t.Errorf("timezone %q: status = %d, body %s; want 200", tz, rec.Code, rec.Body)
-		}
 	}
 }
 
 func TestSettingsArePerOwnerAndTargetedReadsCannotWrite(t *testing.T) {
 	target, targetID := newOwner(t)
-	target.put("coreban-target-"+targetID.String()[:8], "Asia/Manila")
+	target.put("coreban-target-" + targetID.String()[:8])
 	want := target.get()
 
 	other, _ := newOwner(t)
-	if got := other.get(); got.NtfyTopic != nil || got.Timezone != "UTC" {
-		t.Errorf("another owner sees topic %s, timezone %q; want their own defaults", topicOf(got), got.Timezone)
+	if got := other.get(); got.NtfyTopic != nil || got.Saved {
+		t.Errorf("another owner sees topic %s, saved %v; want their own defaults", topicOf(got), got.Saved)
 	}
 
 	adminID := uuid.New()
 	admin := as(t, testharness.Identity{Owner: adminID, Scopes: []string{"admin"}, ActAs: targetID})
-	if got := admin.get(); topicOf(got) != topicOf(want) || got.Timezone != want.Timezone {
-		t.Errorf("admin targeted read = %s %q, want the target's %s %q", topicOf(got), got.Timezone, topicOf(want), want.Timezone)
+	if got := admin.get(); topicOf(got) != topicOf(want) {
+		t.Errorf("admin targeted read = %s, want the target's %s", topicOf(got), topicOf(want))
 	}
-	if rec := admin.put("coreban-admin-"+adminID.String()[:8], "Europe/Berlin"); rec.Code != http.StatusOK {
+	if rec := admin.put("coreban-admin-" + adminID.String()[:8]); rec.Code != http.StatusOK {
 		t.Fatalf("admin put: status = %d, body %s", rec.Code, rec.Body)
 	}
-	if got := target.get(); topicOf(got) != topicOf(want) || got.Timezone != want.Timezone {
-		t.Errorf("target after admin's put = %s %q, want unchanged (writes bind to the caller)", topicOf(got), got.Timezone)
+	if got := target.get(); topicOf(got) != topicOf(want) {
+		t.Errorf("target after admin's put = %s, want unchanged (writes bind to the caller)", topicOf(got))
 	}
 	adminSelf := as(t, testharness.Identity{Owner: adminID, Scopes: []string{"admin"}})
-	if got := adminSelf.get(); got.Timezone != "Europe/Berlin" {
-		t.Errorf("admin's own timezone = %q, want Europe/Berlin", got.Timezone)
+	if got, mine := adminSelf.get(), "coreban-admin-"+adminID.String()[:8]; topicOf(got) != mine {
+		t.Errorf("admin's own topic = %s, want %s", topicOf(got), mine)
 	}
 
 	nonAdmin := as(t, testharness.Identity{Owner: uuid.New(), Scopes: []string{"coreban:read"}, ActAs: targetID})
@@ -208,12 +212,12 @@ func TestSettingsArePerOwnerAndTargetedReadsCannotWrite(t *testing.T) {
 func TestAnOwnerCannotClaimAnotherOwnersTopic(t *testing.T) {
 	alice, aliceID := newOwner(t)
 	topic := "coreban-alice-" + aliceID.String()[:8]
-	if rec := alice.put(topic, "UTC"); rec.Code != http.StatusOK {
+	if rec := alice.put(topic); rec.Code != http.StatusOK {
 		t.Fatalf("alice put: status = %d, body %s", rec.Code, rec.Body)
 	}
 
 	mallory, _ := newOwner(t)
-	rec := mallory.put(topic, "UTC")
+	rec := mallory.put(topic)
 	if rec.Code != http.StatusConflict || errorOf(t, rec) != "ntfy_topic is already in use; choose another name" {
 		t.Errorf("mallory claims alice's topic: status = %d, body %s; want 409", rec.Code, rec.Body)
 	}
@@ -223,11 +227,11 @@ func TestAnOwnerCannotClaimAnotherOwnersTopic(t *testing.T) {
 
 	// Saving your own topic again is not a conflict, and a released topic
 	// can be claimed.
-	if rec := alice.put(topic, "Asia/Manila"); rec.Code != http.StatusOK {
+	if rec := alice.put(topic); rec.Code != http.StatusOK {
 		t.Errorf("alice re-saves her topic: status = %d, body %s; want 200", rec.Code, rec.Body)
 	}
-	alice.put(nil, "UTC")
-	if rec := mallory.put(topic, "UTC"); rec.Code != http.StatusOK {
+	alice.put(nil)
+	if rec := mallory.put(topic); rec.Code != http.StatusOK {
 		t.Errorf("claim a released topic: status = %d, body %s; want 200", rec.Code, rec.Body)
 	}
 }

@@ -10,6 +10,9 @@ import (
 	"net/http"
 	"os"
 	"time"
+	// The runtime image ships without zoneinfo; embed it so every zone a
+	// token asserts loads the same everywhere.
+	_ "time/tzdata"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"

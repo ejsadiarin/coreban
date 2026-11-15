@@ -1,7 +1,6 @@
 package board
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -24,15 +23,6 @@ type Handler struct {
 	Settings *settings.Store
 }
 
-// zone is the owner's timezone.
-func (h *Handler) zone(ctx context.Context, owner uuid.UUID) (*time.Location, error) {
-	s, err := h.Settings.Get(ctx, owner)
-	if err != nil {
-		return nil, err
-	}
-	return time.LoadLocation(s.Timezone)
-}
-
 // zoned is a response holding times to show in the owner's timezone.
 type zoned[T any] interface {
 	inZone(loc *time.Location) T
@@ -40,7 +30,7 @@ type zoned[T any] interface {
 
 // respondZoned writes v with its times in the owner's timezone.
 func respondZoned[T zoned[T]](h *Handler, w http.ResponseWriter, r *http.Request, owner uuid.UUID, status int, v T) {
-	loc, err := h.zone(r.Context(), owner)
+	loc, err := h.Settings.Zone(r.Context(), owner)
 	if err != nil {
 		helper.RespondErrorJSON(w, http.StatusInternalServerError, "failed to load your timezone")
 		return

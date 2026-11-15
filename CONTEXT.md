@@ -7,7 +7,7 @@ A personal kanban and reminder service behind coregateway: users organise work o
 ### Ownership
 
 **Owner**:
-The user a board, reminder, or notification target belongs to, known to coreban only as the identity the gateway asserts. coreban keeps no other user data.
+The user a board, reminder, or notification target belongs to, known to coreban only as the identity the gateway asserts. coreban keeps no other user data: the owner's timezone, which schedules and dues are read in, is the gateway's too (the internal token's `tz` claim, coregateway ADR-0005). coreban remembers only the zone it last saw on a token, for work done without one (the reminder dispatcher) and for tokens that don't carry `tz`.
 _Avoid_: account, member, principal
 
 ### Kanban

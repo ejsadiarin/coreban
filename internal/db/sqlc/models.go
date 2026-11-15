@@ -129,8 +129,9 @@ type NoteReminder struct {
 }
 
 type OwnerSetting struct {
-	OwnerID   uuid.UUID          `json:"owner_id"`
-	NtfyTopic pgtype.Text        `json:"ntfy_topic"`
+	OwnerID   uuid.UUID   `json:"owner_id"`
+	NtfyTopic pgtype.Text `json:"ntfy_topic"`
+	// The IANA zone coreban last saw for this owner in a gateway token's tz claim (coregateway ADR-0005); not set by the owner here.
 	Timezone  string             `json:"timezone"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }

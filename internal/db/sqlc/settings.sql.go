@@ -14,23 +14,32 @@ import (
 
 const getOwnerSettings = `-- name: GetOwnerSettings :one
 
-SELECT ntfy_topic, timezone
+SELECT ntfy_topic
 FROM owner_settings
 WHERE owner_id = $1
 `
 
-type GetOwnerSettingsRow struct {
-	NtfyTopic pgtype.Text `json:"ntfy_topic"`
-	Timezone  string      `json:"timezone"`
-}
-
 // Settings are keyed by owner_id: an owner only ever reads or writes their
 // own row.
-func (q *Queries) GetOwnerSettings(ctx context.Context, ownerID uuid.UUID) (GetOwnerSettingsRow, error) {
+func (q *Queries) GetOwnerSettings(ctx context.Context, ownerID uuid.UUID) (pgtype.Text, error) {
 	row := q.db.QueryRow(ctx, getOwnerSettings, ownerID)
-	var i GetOwnerSettingsRow
-	err := row.Scan(&i.NtfyTopic, &i.Timezone)
-	return i, err
+	var ntfy_topic pgtype.Text
+	err := row.Scan(&ntfy_topic)
+	return ntfy_topic, err
+}
+
+const getOwnerTimezone = `-- name: GetOwnerTimezone :one
+SELECT timezone
+FROM owner_settings
+WHERE owner_id = $1
+`
+
+// The zone coreban last saw for the owner on a token.
+func (q *Queries) GetOwnerTimezone(ctx context.Context, ownerID uuid.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, getOwnerTimezone, ownerID)
+	var timezone string
+	err := row.Scan(&timezone)
+	return timezone, err
 }
 
 const putOwnerSettings = `-- name: PutOwnerSettings :exec
@@ -38,7 +47,6 @@ INSERT INTO owner_settings (owner_id, ntfy_topic, timezone)
 VALUES ($1, $2, $3)
 ON CONFLICT (owner_id) DO UPDATE
 SET ntfy_topic = EXCLUDED.ntfy_topic,
-    timezone = EXCLUDED.timezone,
     updated_at = now()
 `
 
@@ -48,7 +56,30 @@ type PutOwnerSettingsParams struct {
 	Timezone  string      `json:"timezone"`
 }
 
+// timezone is the owner's zone at their first save; afterwards only
+// RecordOwnerTimezone changes it.
 func (q *Queries) PutOwnerSettings(ctx context.Context, arg PutOwnerSettingsParams) error {
 	_, err := q.db.Exec(ctx, putOwnerSettings, arg.OwnerID, arg.NtfyTopic, arg.Timezone)
 	return err
+}
+
+const recordOwnerTimezone = `-- name: RecordOwnerTimezone :execrows
+UPDATE owner_settings
+SET timezone = $1
+WHERE owner_id = $2 AND timezone <> $1
+`
+
+type RecordOwnerTimezoneParams struct {
+	Timezone string    `json:"timezone"`
+	OwnerID  uuid.UUID `json:"owner_id"`
+}
+
+// Records a zone a token carried for an owner who has settings; a row
+// already in that zone is left untouched.
+func (q *Queries) RecordOwnerTimezone(ctx context.Context, arg RecordOwnerTimezoneParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordOwnerTimezone, arg.Timezone, arg.OwnerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

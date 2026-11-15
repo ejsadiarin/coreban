@@ -126,6 +126,9 @@ type Identity struct {
 	Scopes []string
 	// ActAs is the signed targeted-read target (uuid.Nil for none).
 	ActAs uuid.UUID
+	// Timezone is the token's tz claim: the zone of the user the request
+	// is about. Empty is a token without one: the zone last seen is used.
+	Timezone string
 }
 
 // Router returns the production router on the harness Postgres, with id
@@ -152,6 +155,7 @@ func inject(id Identity) func(http.Handler) http.Handler {
 				return
 			}
 			ctx := auth.WithUserID(r.Context(), id.Owner, id.Scopes)
+			ctx = auth.WithTimezone(ctx, id.Timezone)
 			if id.ActAs != uuid.Nil {
 				ctx = auth.WithActAs(ctx, id.ActAs)
 			}

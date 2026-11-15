@@ -197,7 +197,7 @@ func (h *Handler) editCard(w http.ResponseWriter, r *http.Request) {
 	}
 	e := CardEdit{Title: req.Title, Description: req.Description, Archived: req.Archived}
 	if len(req.Due) > 0 {
-		loc, err := h.zone(r.Context(), owner)
+		loc, err := h.Settings.Zone(r.Context(), owner)
 		if err != nil {
 			helper.RespondErrorJSON(w, http.StatusInternalServerError, "failed to load your timezone")
 			return
